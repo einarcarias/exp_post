@@ -38,9 +38,18 @@ class ExpPostProcess:
         }
         return force_dict[force]
 
+    def cut_data(self, start_time, end_time):
+        # reset index
+        time = self.get_time_raw()
+        start_index = time[time >= start_time].index[0]
+        end_index = time[time <= end_time].index[-1]
+        self.df = self.df.iloc[start_index : end_index + 1, :]
+        self.df.reset_index(drop=True, inplace=True)
+
     # post proccessing methods starts here
 
     def find_fft(self, force):
+        self.cut_data(0.02, 0.11)
         force_data = self.dict_search(force)
         N = len(force_data)
         T = self.get_time_raw()[1] - self.get_time_raw()[0]
@@ -48,7 +57,7 @@ class ExpPostProcess:
         xf = fftfreq(N, T)
 
         # Filter out the frequencies you don't want
-        bot, top = (52, 59)
+        bot, top = (150, 200)
         # Create a mask for the frequencies you want to zero out
         mask = (xf > bot) & (xf < top)  # You can adjust the range here
         mask = mask | (
@@ -58,10 +67,10 @@ class ExpPostProcess:
         y_filtered = ifft(yf).real
 
         # using welch method
-        f, Pxx_den = welch(force_data, fs=1 / T, nperseg=1000)
+        f, Pxx_den = welch(force_data, fs=1 / T, nperseg=256)
 
         # top bot
-        bot_butter, top_butter = (44, 67)
+        bot_butter, top_butter = (185, 195)
         # apply butterworth filter from welch method
         y_filtered_butter = ExpPostProcess.butter_bandpass_filter(
             force_data, bot_butter, top_butter, 1 / T, order=6
@@ -141,7 +150,7 @@ def read_data(column, filename):
     smooth = data.iloc[:, column].rolling(window=window, center=True).mean()
     smooth.fillna(0, inplace=True)
     data["smooth"] = smooth
-    min_max_dict = {1: (0.0460, 0.0665), 2: (0.0460, 0.0665), 3: (0.0460, 0.0665)}
+    min_max_dict = {1: (0.0420, 0.0650), 2: (0.0420, 0.065), 3: (0.0420, 0.065)}
     min_time, max_time = min_max_dict[column]
     relevant_data = (data.iloc[:, 0] >= min_time) & (data.iloc[:, 0] <= max_time)
     indices = data[relevant_data].index
@@ -207,7 +216,7 @@ if __name__ == "__main__":
         5: {5: "TR014.csv", 17.5: ["TR015.csv", "TR017.csv"]},
     }
 
-    column = 2
+    column = 1
     list_repeats = []
     a5d0 = read_data(column, "TR004.csv")
     rho = 0.0371
