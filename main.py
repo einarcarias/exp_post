@@ -40,23 +40,19 @@ class ExpPostProcess:
     
     def plot_avg(self, force):
         dict = {"moment": 3, "lift": 1, "drag": 2}
-        data = self.df
         column = dict[force]
         window = 100
         smooth = self.df.iloc[:, column].rolling(window=window, center=True).mean()
         smooth.fillna(0, inplace=True)
-        data["smooth"] = smooth
-        min_max_dict = {1: (0.0420, 0.0650), 2: (0.0420, 0.065), 3: (0.0420, 0.065)}
-        min_time, max_time = min_max_dict[column]
-        relevant_data = (data.iloc[:, 0] >= min_time) & (data.iloc[:, 0] <= max_time)
-        indices = data[relevant_data].index
-        std = data.loc[indices, ["smooth"]].std()
-        avg_force = data.loc[indices, ["smooth"]].mean()
+        self.df[f"smooth {dict[force]}"] = smooth
+        min_time, max_time = 0.0460, 0.0645
+        relevant_data = (self.df.iloc[:, 0] >= min_time) & (self.df.iloc[:, 0] <= max_time)
+        indices = self.df[relevant_data].index
 
         # Plotting original and smoothed data
         plt.figure(figsize=(10, 6))
-        plt.plot(data.iloc[:, 0], data.iloc[:, column], label="Original Data", color="blue")
-        plt.plot(data.iloc[:, 0], smooth, label="Moving Average", color="red")
+        plt.plot(self.df.iloc[:, 0], self.df.iloc[:, column], label="Original Data", color="blue")
+        plt.plot(self.df.iloc[:, 0], smooth, label="Moving Average", color="red")
         plt.axvline(x=min_time, color="black", linestyle="--")
         plt.axvline(x=max_time, color="black", linestyle="--")
         plt.xlabel("Time")
@@ -65,6 +61,20 @@ class ExpPostProcess:
 
         plt.legend()
         plt.show()
+    
+    def get_avg(self, force):
+
+        dict = {"moment": 3, "lift": 1, "drag": 2}
+        column = dict[force]
+        window = 100
+        smooth = self.df.iloc[:, column].rolling(window=window, center=True).mean()
+        smooth.fillna(0, inplace=True)
+        self.df[f"smooth {dict[force]}"] = smooth
+        min_time, max_time = 0.0460, 0.0645
+        relevant_data = (self.df.iloc[:, 0] >= min_time) & (self.df.iloc[:, 0] <= max_time)
+        indices = self.df[relevant_data].index
+        std = self.df.loc[indices, [f"smooth {dict[force]}"]].std()
+        avg_force = self.df.loc[indices, [f"smooth {dict[force]}"]].mean()
         return avg_force, std
 
 
@@ -171,60 +181,27 @@ class ExpPostProcess:
         return y
 
 
-def read_data(column, filename):
-    data_dir = Path("data")
-    os.chdir(data_dir)
-
-    data = pd.read_csv(filename, delimiter="\t")
-    window = 90
-    smooth = data.iloc[:, column].rolling(window=window, center=True).mean()
-    smooth.fillna(0, inplace=True)
-    data["smooth"] = smooth
-    min_max_dict = {1: (0.0420, 0.0650), 2: (0.0420, 0.065), 3: (0.0420, 0.065)}
-    min_time, max_time = min_max_dict[column]
-    relevant_data = (data.iloc[:, 0] >= min_time) & (data.iloc[:, 0] <= max_time)
-    indices = data[relevant_data].index
-    std = data.loc[indices, ["smooth"]].std()
-    avg_force = data.loc[indices, ["smooth"]].mean()
-
-    # Plotting original and smoothed data
-    plt.figure(figsize=(10, 6))
-    plt.plot(data.iloc[:, 0], data.iloc[:, column], label="Original Data", color="blue")
-    plt.plot(data.iloc[:, 0], smooth, label="Moving Average", color="red")
-    plt.axvline(x=min_time, color="black", linestyle="--")
-    plt.axvline(x=max_time, color="black", linestyle="--")
-    plt.xlabel("Time")
-    plt.ylabel("Value")
-    plt.title("Centered Moving Average Smoothing")
-
-    plt.legend()
-    plt.show()
-    os.chdir("..")
-    print(avg_force)
-    return avg_force, std
 
 
-def force_coef_std(dict, force, force_std):
+def force_coef_std_calc(dict, force, force_std):
     rho, rho_std = dict["rho"]
     velocity, velocity_std = dict["velocity"]
     diameter, diameter_std = dict["diameter"]
-    force_coef = (force - rho * velocity**2 * diameter**2 / 8) / (
-        rho * velocity**2 * diameter**2 / 8
-    )
+    force_coef = force / (0.5 * rho * velocity ** 2 * ((np.pi*diameter/4) ** 2)) 
     force_coef_std = force_coef * np.sqrt(
         (force_std / force) ** 2
         + (rho_std / rho) ** 2
-        + (2 * velocity_std / velocity) ** 2
-        + (diameter_std / diameter) ** 2
+        + (4* velocity_std / velocity) ** 2
+        +  (4* diameter_std / diameter) ** 2
     )
     return force_coef, force_coef_std
 
 
-def force_repeat_avg(force_list, force_std_list):
+def force_repeat_avg_calc(force_list, force_std_list):
     force_avg = np.mean(force_list)
     force_std_avg = np.sqrt(np.sum(np.array(force_std_list) ** 2)) / np.sum(
         np.array(force_list)
-    )
+    ) * force_avg
     return force_avg, force_std_avg
 
 
@@ -239,17 +216,17 @@ if __name__ == "__main__":
     }
     fin_config_data = {
         0: {0: "TR009.csv", 10: "TR012.csv"},
-        5: {0: "TR010.csv", 10: "TR011.csv"},
+        5: {0: "TR010.csv", 10: ["TR011.csv", "TR021.csv", "TR020.csv"]},
     }
     flap_config_data = {
         0: {5: "TR013.csv", 17.5: "TR016.csv"},
-        5: {5: "TR014.csv", 17.5: ["TR015.csv", "TR017.csv"]},
+        5: {5: "TR014.csv", 17.5: ["TR015.csv", "TR017.csv", "TR019.csv"]},
     }
 
     rho = 0.0371
-    rho_std = 7.1  # in percent
+    rho_std = (7.1/100)*rho  # in percent
     velocity = 1553
-    velocity_std = 1.6  # in percent
+    velocity_std = 1.6/100 * velocity  # in percent
     diameter = 0.06
     diameter_std = 0  # in percent. Need to ask Simon this
     # put all conditions in a dictionary
@@ -258,6 +235,69 @@ if __name__ == "__main__":
         "velocity": (velocity, velocity_std),
         "diameter": (diameter, diameter_std),
     }
-    test = ExpPostProcess("TR004.csv")
-    test.plot_avg("lift")
     # using moving average to smooth data
+    test = ExpPostProcess("TR008.csv")
+    test.plot_avg("lift")
+
+    # processing repeats
+    # bicone
+    bicone = {}
+    bicone_repeats = {}
+
+    for key in [0,6]:
+        if type(bicone_data[key]) == list:
+            for key_force in ["drag","lift","moment"]:
+                force_list = []
+                force_std_list = []
+                for file in bicone_data[key]:
+                    test = ExpPostProcess(file)
+                    force, force_std = test.get_avg(key_force)
+                    force_list.append(force)
+                    force_std_list.append(force_std)
+                force_avg, force_std_avg = force_repeat_avg_calc(force_list, force_std_list)
+                force_coef, force_coef_std = force_coef_std_calc(
+                    condition_dict, force_avg, force_std_avg
+                )
+                bicone_repeats[key_force] = (force_coef, force_coef_std)
+            bicone[key] = bicone_repeats
+
+    
+    # fin config
+    fin_config_repeats = {}
+    
+
+    for key_force in ["drag", "lift", "moment"]:
+        force_list = []
+        force_std_list = []
+        for file in fin_config_data[5][10]:
+            test = ExpPostProcess(file)
+            force, force_std = test.get_avg(key_force)
+            force_list.append(force)
+            force_std_list.append(force_std)
+        force_avg, force_std_avg = force_repeat_avg_calc(force_list, force_std_list)
+        force_coef, force_coef_std = force_coef_std_calc(
+            condition_dict, force_avg, force_std_avg
+        )
+        fin_config_repeats[key_force] = (force_coef, force_coef_std)
+    print(f"fin config: {fin_config_repeats}")
+    # flap config
+    flap_config_repeats = {}
+    for key_force in ["drag", "lift", "moment"]:
+        force_list = []
+        force_std_list = []
+        for file in flap_config_data[5][17.5]:
+            test = ExpPostProcess(file)
+            force, force_std = test.get_avg(key_force)
+            force_list.append(force)
+            force_std_list.append(force_std)
+        force_avg, force_std_avg = force_repeat_avg_calc(force_list, force_std_list)
+        force_coef, force_coef_std = force_coef_std_calc(
+            condition_dict, force_avg, force_std_avg
+        )
+        flap_config_repeats[key_force] = (force_coef, force_coef_std)
+
+    print(f"flap config: {flap_config_repeats}")
+
+
+
+
