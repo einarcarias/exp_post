@@ -37,6 +37,36 @@ class ExpPostProcess:
             "drag": self.get_drag_raw(),
         }
         return force_dict[force]
+    
+    def plot_avg(self, force):
+        dict = {"moment": 3, "lift": 1, "drag": 2}
+        data = self.df
+        column = dict[force]
+        window = 100
+        smooth = self.df.iloc[:, column].rolling(window=window, center=True).mean()
+        smooth.fillna(0, inplace=True)
+        data["smooth"] = smooth
+        min_max_dict = {1: (0.0420, 0.0650), 2: (0.0420, 0.065), 3: (0.0420, 0.065)}
+        min_time, max_time = min_max_dict[column]
+        relevant_data = (data.iloc[:, 0] >= min_time) & (data.iloc[:, 0] <= max_time)
+        indices = data[relevant_data].index
+        std = data.loc[indices, ["smooth"]].std()
+        avg_force = data.loc[indices, ["smooth"]].mean()
+
+        # Plotting original and smoothed data
+        plt.figure(figsize=(10, 6))
+        plt.plot(data.iloc[:, 0], data.iloc[:, column], label="Original Data", color="blue")
+        plt.plot(data.iloc[:, 0], smooth, label="Moving Average", color="red")
+        plt.axvline(x=min_time, color="black", linestyle="--")
+        plt.axvline(x=max_time, color="black", linestyle="--")
+        plt.xlabel("Time")
+        plt.ylabel("Value")
+        plt.title("Centered Moving Average Smoothing")
+
+        plt.legend()
+        plt.show()
+        return avg_force, std
+
 
     def cut_data(self, start_time, end_time):
         # reset index
@@ -216,9 +246,6 @@ if __name__ == "__main__":
         5: {5: "TR014.csv", 17.5: ["TR015.csv", "TR017.csv"]},
     }
 
-    column = 1
-    list_repeats = []
-    a5d0 = read_data(column, "TR004.csv")
     rho = 0.0371
     rho_std = 7.1  # in percent
     velocity = 1553
@@ -232,5 +259,5 @@ if __name__ == "__main__":
         "diameter": (diameter, diameter_std),
     }
     test = ExpPostProcess("TR004.csv")
-    test.find_fft("lift")
+    test.plot_avg("lift")
     # using moving average to smooth data
