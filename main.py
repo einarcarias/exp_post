@@ -96,12 +96,13 @@ class ExpPostProcess:
     # post proccessing methods starts here
 
     def find_fft(self, force):
-        self.cut_data(0.02, 0.11)
+        self.cut_data(0.040, 0.07)
         force_data = self.dict_search(force)
         N = len(force_data)
-        T = self.get_time_raw()[1] - self.get_time_raw()[0]
-        yf = fft(force_data.to_numpy())
-        xf = fftfreq(N, T)
+        Fs = 1 / np.mean(np.diff(self.get_time_raw()))
+        T = 1 / Fs
+        yf = fft(force_data.to_numpy())[: N // 2] / N
+        xf = fftfreq(N, T)[: N // 2]
 
         # Filter out the frequencies you don't want
         bot, top = (150, 200)
@@ -111,7 +112,6 @@ class ExpPostProcess:
             (xf < -top) & (xf > -top)
         )  # Also zero out the negative frequencies corresponding to this range
         yf[mask] = 0
-        y_filtered = ifft(yf).real
 
         # using welch method
         f, Pxx_den = welch(force_data, fs=1 / T, nperseg=256)
@@ -133,43 +133,34 @@ class ExpPostProcess:
 
         # Plot Fourier Transform results
         plt.subplot(3, 1, 2)
-        plt.title("Fourier Transform")
-        plt.plot(xf[: N // 2], 2.0 / N * np.abs(yf[: N // 2]))
+        plt.title("Fourier Transform(Log-Log Scale)")
+        plt.loglog(xf, np.abs(yf))  # plotting include normalization
         plt.xlabel("Frequency")
         plt.ylabel("Amplitude")
 
-        # plot inverse Fourier Transform
+        # plot fourier transform in linear scale
         plt.subplot(3, 1, 3)
-        plt.title("Inverse Fourier Transform")
-        plt.plot(self.get_time_raw(), y_filtered)
-        plt.xlabel("Time")
-        plt.ylabel(force)
+        plt.title("Fourier Transform(Linear Scale)")
+        plt.plot(xf, np.abs(yf))
+        plt.xlabel("Frequency")
+        plt.ylabel("Amplitude")
 
         plt.tight_layout()
         plt.show()
 
         # Plot original time series
-        plt.figure()
-        plt.subplot(3, 1, 1)
-        plt.title("Original Time Series")
-        plt.plot(self.get_time_raw(), force_data)
-        plt.xlabel("Time")
-        plt.ylabel(force)
-        # plot welch method
-        plt.subplot(3, 1, 2)
-        plt.title("Welch Method")
-        plt.plot(f, Pxx_den)
-        plt.xlabel("Frequency")
-        plt.ylabel("PSD")
-
-        # plot welch method with butterworth filter
-        plt.subplot(3, 1, 3)
-        plt.title("Welch Method with Butterworth Filter")
-        plt.plot(self.get_time_raw(), y_filtered_butter)
-        plt.xlabel("Time")
-        plt.ylabel(force)
-        plt.tight_layout()
-        plt.show()
+        # plt.figure()
+        # plt.subplot(2, 1, 1)
+        # plt.title("Original Time Series")
+        # plt.plot(self.get_time_raw(), force_data)
+        # plt.xlabel("Time")
+        # plt.ylabel(force)
+        # # plot welch method
+        # plt.subplot(2, 1, 2)
+        # plt.title("Welch Method")
+        # plt.loglog(f, Pxx_den)
+        # plt.xlabel("Frequency")
+        # plt.ylabel("PSD")
 
     @staticmethod
     # Function to design Butterworth bandpass filter
@@ -266,8 +257,8 @@ class PostPlots:
             ax.set_xlabel("Deflection Angle (deg)")
             ax.set_ylabel(f"{force.capitalize()} Coefficient")
             ax.legend()
+        fig.tight_layout()
         plt.show()
-        plt.tight_layout()
 
 
 def force_coef_std_calc(dict, force, force_std):
@@ -325,8 +316,9 @@ if __name__ == "__main__":
         "diameter": (diameter, diameter_std),
     }
     # using moving average to smooth data
-    test = ExpPostProcess("TR008.csv")
+    test = ExpPostProcess("TR003.csv")
     test.plot_avg("lift")
+    test.find_fft("lift")
 
     # %% processing repeats
     # bicone
@@ -484,63 +476,12 @@ if __name__ == "__main__":
         flap_exp_df, values="force_coef_std", index=["aoa", "def"], columns=["force"]
     ).reset_index()
 
-    fig, axs = plt.subplots(1, 2, figsize=(12, 6))
-    for aoa, exp_sym, cfd_sym in zip([0, 5], ["s", "x"], ["o", "^"]):
-        axs[0].scatter(
-            fin_cfd.query(f"aoa == {str(aoa)}")["def"],
-            fin_cfd.query(f"aoa == {str(aoa)}")["CD"],
-            marker=cfd_sym,
-            c="r",
-            label=f"alpha={aoa}(CFD)",
-        )
-        axs[0].scatter(
-            fin_exp_df_data.query(f"aoa == {str(aoa)}")["def"],
-            fin_exp_df_data.query(f"aoa == {str(aoa)}")["drag"],
-            marker=exp_sym,
-            c="k",
-            label=f"alpha={aoa}(Exp)",
-        )
-        axs[0].errorbar(
-            fin_exp_df_data.query(f"aoa == {str(aoa)}")["def"],
-            fin_exp_df_data.query(f"aoa == {str(aoa)}")["drag"],
-            yerr=fin_exp_df_std.query(f"aoa == {str(aoa)}")["drag"],
-            fmt="none",
-            c="k",
-            capsize=5,
-        )
-        axs[0].set_title("Fin")
-        axs[1].set_title("Flap")
-        axs[1].scatter(
-            flap_cfd.query("aoa==0")["def"],
-            flap_cfd.query(f"aoa == {str(aoa)}")["CD"],
-            marker=cfd_sym,
-            c="r",
-            label=f"alpha={aoa}(CFD)",
-        )
-        axs[1].scatter(
-            flap_exp_df_data.query(f"aoa == {str(aoa)}")["def"],
-            flap_exp_df_data.query(f"aoa == {str(aoa)}")["drag"],
-            marker=exp_sym,
-            c="k",
-            label=f"alpha={aoa}(Exp)",
-        )
-        axs[1].errorbar(
-            flap_exp_df_data.query(f"aoa == {str(aoa)}")["def"],
-            flap_exp_df_data.query(f"aoa == {str(aoa)}")["drag"],
-            yerr=flap_exp_df_std.query(f"aoa == {str(aoa)}")["drag"],
-            fmt="none",
-            c="k",
-            capsize=5,
-        )
-    for ax in axs:
-        ax.set_xlabel("Deflection Angle (deg)")
-        ax.set_ylabel("Drag Coefficient")
-        ax.legend()
-        ax.set_ylim(0, 0.350)
-    plt.show()
-
-    PostPlots(
+    temp = PostPlots(
         [fin_cfd, flap_cfd],
         [fin_exp_df_data, flap_exp_df_data],
         [fin_exp_df_std, flap_exp_df_std],
-    ).plot_aoa(5, "lift")
+    )
+    temp.plot_aoa(0, "drag")
+    temp.plot_aoa(5, "drag")
+    # temp.plot_aoa(0, "lift")
+    # temp.plot_aoa(5, "lift")
