@@ -256,6 +256,7 @@ class PostPlots:
         for ax in axs:
             ax.set_xlabel("Deflection Angle (deg)")
             ax.set_ylabel(f"{force.capitalize()} Coefficient")
+            ax.set_ylim(0, 0.3)
             ax.legend()
         fig.tight_layout()
         plt.show()
@@ -316,9 +317,11 @@ if __name__ == "__main__":
         "diameter": (diameter, diameter_std),
     }
     # using moving average to smooth data
-    test = ExpPostProcess("TR003.csv")
+    test = ExpPostProcess("TR009.csv")
+    test.plot_avg("drag")
     test.plot_avg("lift")
-    test.find_fft("lift")
+
+    # test.find_fft("lift")
 
     # %% processing repeats
     # bicone
@@ -483,5 +486,5 @@ if __name__ == "__main__":
     )
     temp.plot_aoa(0, "drag")
     temp.plot_aoa(5, "drag")
-    # temp.plot_aoa(0, "lift")
-    # temp.plot_aoa(5, "lift")
+    temp.plot_aoa(0, "lift")
+    temp.plot_aoa(5, "lift")
