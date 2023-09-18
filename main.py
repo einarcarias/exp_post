@@ -286,6 +286,50 @@ def force_repeat_avg_calc(force_list, force_std_list):
     return force_avg, force_std_avg
 
 
+class PostPlots_bcone(PostPlots):
+    def __init__(self, cfd_df, exp_df, exp_df_std):
+        self.cfd_df = cfd_df
+        self.exp_df = exp_df
+        self.exp_df_std = exp_df_std
+
+    def plot_aoa(self, force):
+        # data sort
+        bcone_cfd = self.cfd_df
+        bcone_df_data = self.exp_df
+        bcone_df_std = self.exp_df_std
+
+        fig, axs = plt.subplots(figsize=(12, 6))
+        axs.scatter(
+            bcone_cfd["aoa"],
+            bcone_cfd[self.dict_search(force)],
+            marker="o",
+            c="r",
+            label=f"CFD",
+        )
+        axs.scatter(
+            bcone_df_data["aoa"],
+            bcone_df_data[force],
+            marker="s",
+            c="k",
+            label=f"Exp",
+        )
+        axs.errorbar(
+            bcone_df_data["aoa"],
+            bcone_df_data[force],
+            yerr=bcone_df_std[force],
+            fmt="none",
+            c="k",
+            capsize=5,
+        )
+
+        axs.set_xlabel("Deflection Angle (deg)")
+        axs.set_ylabel(f"{force.capitalize()} Coefficient")
+        axs.set_ylim(0, 0.3)
+        axs.legend()
+        fig.tight_layout()
+        plt.show()
+
+
 if __name__ == "__main__":
     # data file dictionary
     # modify accordingly
@@ -309,7 +353,7 @@ if __name__ == "__main__":
     velocity = 1553
     velocity_std = 1.6 / 100 * velocity  # in percent
     diameter = 0.06
-    diameter_std = 0  # in percent. Need to ask Simon this
+    diameter_std = 0.0005
     # put all conditions in a dictionary
     condition_dict = {
         "rho": (rho, rho_std),
@@ -330,6 +374,8 @@ if __name__ == "__main__":
 
     for key in [0, 2, 4, 6]:
         if type(bicone_data[key]) == list:
+            bicone_exp[key] = {}
+            bicone_repeats = {}
             for key_force in ["drag", "lift", "moment"]:
                 force_list = []
                 force_std_list = []
@@ -433,6 +479,26 @@ if __name__ == "__main__":
     flap_cfd = pd.read_excel("combined.ods", engine="odf", sheet_name="flap_cfd")
     print(bicone_cfd)
     # %% plotting with cfd and exp
+
+    # flatten bicone
+    record = []
+    for aoa, aoa_data in bicone_exp.items():
+        for force_typ, force_data in aoa_data.items():
+            record_dict = {
+                "aoa": aoa,
+                "force": force_typ,
+                "force_coef": force_data[0],
+                "force_coef_std": force_data[1],
+            }
+            record.append(record_dict)
+    bicone_exp_df = pd.DataFrame(record)
+    bicone_exp_df_data = pd.pivot_table(
+        bicone_exp_df, values="force_coef", index=["aoa"], columns=["force"]
+    ).reset_index()
+    bicone_exp_df_std = pd.pivot_table(
+        bicone_exp_df, values="force_coef_std", index=["aoa"], columns=["force"]
+    ).reset_index()
+
     # plot fin and flap side by side
     # flatted fin dictionary
     record = []
@@ -488,3 +554,7 @@ if __name__ == "__main__":
     temp.plot_aoa(5, "drag")
     temp.plot_aoa(0, "lift")
     temp.plot_aoa(5, "lift")
+
+    bcone = PostPlots_bcone(bicone_cfd, bicone_exp_df_data, bicone_exp_df_std)
+    bcone.plot_aoa("drag")
+    bcone.plot_aoa("lift")
