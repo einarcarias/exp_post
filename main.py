@@ -32,6 +32,16 @@ class ExpPostProcess:
     def get_drag_raw(self):
         return self.df.iloc[:, 2]
 
+    def get_minmax(self, force):
+        dict = {"moment": 3, "lift": 1, "drag": 2}
+        column = dict[force]
+        min_time, max_time = {
+            1: (0.0495, 0.0645) if self.aoa != 0 else (0.0430, 0.062),
+            2: (0.0460, 0.0645),
+            3: (0.0460, 0.0645),
+        }[column]
+        return min_time, max_time
+
     def dict_search(self, force):
         force_dict = {
             "moment": self.get_moment_raw(),
@@ -44,11 +54,7 @@ class ExpPostProcess:
         dict = {"moment": 3, "lift": 1, "drag": 2}
         column = dict[force]
         self.get_avg(force)
-        min_time, max_time = {
-            1: (0.0495, 0.0645),
-            2: (0.0460, 0.0645),
-            3: (0.0460, 0.0645),
-        }[column]
+        min_time, max_time = self.get_minmax(force)
 
         # Plotting original and smoothed data
         plt.figure(figsize=(6, 3))
@@ -115,11 +121,7 @@ class ExpPostProcess:
         smooth = self.df.iloc[:, column].rolling(window=window, center=True).mean()
         smooth.fillna(0, inplace=True)
         self.df[f"smooth {dict[force]}"] = smooth
-        min_time, max_time = {
-            1: (0.0495, 0.0645) if self.aoa != 0 else (0.05, 0.07),
-            2: (0.0460, 0.0645),
-            3: (0.0460, 0.0645),
-        }[column]
+        min_time, max_time = self.get_minmax(force)
         relevant_data = (self.df.iloc[:, 0] >= min_time) & (
             self.df.iloc[:, 0] <= max_time
         )
@@ -264,6 +266,7 @@ class PostPlots:
             c="k",
             label=f"alpha={aoa}(Exp)",
         )
+        print(fin_exp_df_std[force])
         axs[0].errorbar(
             fin_exp_df_data["def"],
             fin_exp_df_data[force],
@@ -303,92 +306,6 @@ class PostPlots:
             ax.legend()
         fig.tight_layout()
         plt.show(block=False)
-
-
-# functions
-
-
-def force_coef_std_calc(dict, force, force_std):
-    rho, rho_std = dict["rho"]
-    velocity, velocity_std = dict["velocity"]
-    diameter, diameter_std = dict["diameter"]
-    force_coef = force / (0.5 * rho * velocity**2 * ((np.pi * diameter**2 / 4)))
-    force_coef_std = force_coef * np.sqrt(
-        (force_std / force) ** 2
-        + (rho_std / rho) ** 2
-        + (4 * velocity_std / velocity) ** 2
-        + (4 * diameter_std / diameter) ** 2
-    )
-    return force_coef, force_coef_std
-
-
-def force_repeat_avg_calc(force_list, force_std_list):
-    force_avg = np.mean(force_list)
-    force_std_avg = (
-        np.sqrt(np.sum(np.array(force_std_list) ** 2))
-        / np.sum(np.array(force_list))
-        * force_avg
-    )
-    return force_avg, force_std_avg
-
-
-def compare_avg_plot(*args, **kwargs):
-    for key, value in kwargs.items():
-        if key == "force":
-            force = value
-        elif key == "title":
-            title = value
-        elif key == "aoa":
-            aoa = value
-    # Create a figure and a grid of subplots
-    n_instances = len(args)
-    fig, axs = plt.subplots(n_instances, 1, figsize=(15, 5))
-
-    for i, obj in enumerate(args):
-        y_label = f"{force[i].capitalize()} Force (N)"
-        x_label = "Time(S)"
-        dict = {"moment": 3, "lift": 1, "drag": 2}
-        column = dict[force[i]]
-        min_time, max_time = {
-            1: (0.0495, 0.0645) if aoa[i] != 0 else (0.05, 0.07),
-            2: (0.0460, 0.0645),
-            3: (0.0460, 0.0645),
-        }[column]
-        obj.get_avg(force[i])
-        if not isinstance(obj, ExpPostProcess):
-            print(f"Skipping argument {i+1}, not a ExpPostProcess object.")
-            continue
-
-        if n_instances == 1:  # Special case when only one subplot
-            ax = axs
-        else:
-            ax = axs[i]
-
-        ax.plot(
-            obj.df.iloc[:, 0],
-            obj.df.iloc[:, column],
-            label="Original Data",
-            color="blue",
-        )
-        ax.plot(
-            obj.df.iloc[:, 0],
-            obj.df[f"smooth {dict[force[i]]}"],
-            color="red",
-            label="Moving Average",
-        )
-        ax.set_title(f"{title[i]}")
-        ax.axvline(x=min_time, color="black", linestyle="--")
-        ax.axvline(x=max_time, color="black", linestyle="--")
-        ax.set_xlabel(x_label)
-        ax.set_ylabel(y_label)
-        # Add major grid lines
-        ax.grid(which="major", linestyle="-", linewidth="0.5", color="black")
-
-        # Add minor grid lines
-        ax.minorticks_on()
-        ax.grid(which="minor", linestyle=":", linewidth="0.5", color="gray")
-    plt.tight_layout()
-    plt.show(block=False)
 
 
 class PostPlots_bcone(PostPlots):
@@ -433,6 +350,137 @@ class PostPlots_bcone(PostPlots):
         axs.legend()
         fig.tight_layout()
         plt.show()
+
+
+# %% functions
+
+
+def force_coef_std_calc(param_dict, force, force_std):
+    rho, rho_std = param_dict["rho"]
+    velocity, velocity_std = param_dict["velocity"]
+    diameter, diameter_std = param_dict["diameter"]
+    force_coef = force / (0.5 * rho * velocity**2 * ((np.pi * diameter**2 / 4)))
+    term1 = (force_std / force) ** 2
+    term2 = (rho_std / rho) ** 2
+    term3 = 4 * ((velocity_std / velocity) ** 2)
+    term4 = 4 * ((diameter_std / diameter) ** 2)
+
+    force_coef_std = force_coef * np.sqrt(term1 + term2 + term3 + term4)
+
+    return force_coef, force_coef_std
+
+
+def force_repeat_avg_calc(force_list, force_std_list):
+    force_avg = np.mean(force_list)
+    force_std_avg = force_avg * (
+        np.sqrt(np.sum(np.array(force_std_list) ** 2)) / np.sum(np.array(force_list))
+    )
+    return force_avg, force_std_avg
+
+
+def compare_avg_plot(*args, **kwargs):
+    for key, value in kwargs.items():
+        if key == "force":
+            force = value
+        elif key == "title":
+            title = value
+        elif key == "aoa":
+            aoa = value
+    # Create a figure and a grid of subplots
+    n_instances = len(args)
+    fig, axs = plt.subplots(n_instances, 1, figsize=(15, 5))
+
+    for i, obj in enumerate(args):
+        y_label = f"{force[i].capitalize()} Force (N)"
+        x_label = "Time(S)"
+        dict = {"moment": 3, "lift": 1, "drag": 2}
+        column = dict[force[i]]
+        min_time, max_time = obj.get_minmax(force[i])
+        obj.get_avg(force[i])
+        if not isinstance(obj, ExpPostProcess):
+            print(f"Skipping argument {i+1}, not a ExpPostProcess object.")
+            continue
+
+        if n_instances == 1:  # Special case when only one subplot
+            ax = axs
+        else:
+            ax = axs[i]
+
+        ax.plot(
+            obj.df.iloc[:, 0],
+            obj.df.iloc[:, column],
+            label="Original Data",
+            color="blue",
+        )
+        ax.plot(
+            obj.df.iloc[:, 0],
+            obj.df[f"smooth {dict[force[i]]}"],
+            color="red",
+            label="Moving Average",
+        )
+        ax.set_title(f"{title[i]}")
+        ax.axvline(x=min_time, color="black", linestyle="--")
+        ax.axvline(x=max_time, color="black", linestyle="--")
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
+        # Add major grid lines
+        ax.grid(which="major", linestyle="-", linewidth="0.5", color="black")
+
+        # Add minor grid lines
+        ax.minorticks_on()
+        ax.grid(which="minor", linestyle=":", linewidth="0.5", color="gray")
+    plt.tight_layout()
+    plt.show(block=False)
+
+
+def force_coef_dict_maker(kargs, condition):
+    force_exp = {}
+    for key in kargs.keys():
+        force_exp[key] = {}
+        for key_def in kargs[key].keys():
+            force_exp[key][key_def] = {}
+            if type(kargs[key][key_def]) == list:
+                for key_force in ["drag", "lift", "moment"]:
+                    force_list = []
+                    force_std_list = []
+                    force_coef_list = []
+                    force_std_coef_list = []
+                    for file in kargs[key][key_def]:
+                        # get the force average from time series
+                        test = ExpPostProcess(file, key)
+                        force, force_std = test.get_avg(key_force)
+                        # append to list
+                        force_list.append(force)
+                        force_std_list.append(force_std)
+                        force_coef_temp, force_coef_std_temp = force_coef_std_calc(
+                            condition, force, force_std
+                        )
+                        force_coef_list.append(force_coef_temp)
+                        force_std_coef_list.append(force_coef_std_temp)
+
+                    force_avg, force_std_avg = force_repeat_avg_calc(
+                        force_list, force_std_list
+                    )
+                    force_coef, force_coef_std = force_repeat_avg_calc(
+                        force_coef_list, force_std_coef_list
+                    )
+                    force_exp[key][key_def][key_force] = (
+                        force_coef,
+                        force_coef_std,
+                    )
+            else:
+                # if its not a list
+                for key_force in ["drag", "lift", "moment"]:
+                    test = ExpPostProcess(kargs[key][key_def], key)
+                    force, force_std = test.get_avg(key_force)
+                    force_coef, force_coef_std = force_coef_std_calc(
+                        condition, force, force_std
+                    )
+                    force_exp[key][key_def][key_force] = (
+                        force_coef,
+                        force_coef_std,
+                    )
+    return force_exp
 
 
 if __name__ == "__main__":
@@ -522,73 +570,42 @@ if __name__ == "__main__":
                 bicone_exp[key][key_force] = (force_coef, force_coef_std)
 
     # fin config
-    fin_exp = {}
+    fin_exp = force_coef_dict_maker(fin_config_data, condition_dict)
     fin_config_repeats = {}
 
-    for key in [0, 5]:
-        fin_exp[key] = {}
-        for key_def in [0, 10]:
-            if type(fin_config_data[key][key_def]) == list:
-                for key_force in ["drag", "lift", "moment"]:
-                    force_list = []
-                    force_std_list = []
-                    for file in fin_config_data[key][key_def]:
-                        test = ExpPostProcess(file, key)
-                        force, force_std = test.get_avg(key_force)
-                        force_list.append(force)
-                        force_std_list.append(force_std)
-                    force_avg, force_std_avg = force_repeat_avg_calc(
-                        force_list, force_std_list
-                    )
-                    force_coef, force_coef_std = force_coef_std_calc(
-                        condition_dict, force_avg, force_std_avg
-                    )
-                    fin_config_repeats[key_force] = (force_coef, force_coef_std)
-                fin_exp[key][key_def] = fin_config_repeats
-            else:
-                # if its not a list
-                fin_exp[key][key_def] = {}
-                for key_force in ["drag", "lift", "moment"]:
-                    test = ExpPostProcess(fin_config_data[key][key_def], key)
-                    force, force_std = test.get_avg(key_force)
-                    force_coef, force_coef_std = force_coef_std_calc(
-                        condition_dict, force, force_std
-                    )
-                    fin_exp[key][key_def][key_force] = (force_coef, force_coef_std)
-
     # flap config
-    flap_exp = {}
-    flap_config_repeats = {}
-    for key in [0, 5]:
-        flap_exp[key] = {}
-        for key_def in [5, 17.5]:
-            if type(flap_config_data[key][key_def]) == list:
-                for key_force in ["drag", "lift", "moment"]:
-                    force_list = []
-                    force_std_list = []
-                    for file in flap_config_data[key][key_def]:
-                        test = ExpPostProcess(file, key)
-                        force, force_std = test.get_avg(key_force)
-                        force_list.append(force)
-                        force_std_list.append(force_std)
-                    force_avg, force_std_avg = force_repeat_avg_calc(
-                        force_list, force_std_list
-                    )
-                    force_coef, force_coef_std = force_coef_std_calc(
-                        condition_dict, force_avg, force_std_avg
-                    )
-                    flap_config_repeats[key_force] = (force_coef, force_coef_std)
-                flap_exp[key][key_def] = flap_config_repeats
-            else:
-                # if its not a list
-                flap_exp[key][key_def] = {}
-                for key_force in ["drag", "lift", "moment"]:
-                    test = ExpPostProcess(flap_config_data[key][key_def], key)
-                    force, force_std = test.get_avg(key_force)
-                    force_coef, force_coef_std = force_coef_std_calc(
-                        condition_dict, force, force_std
-                    )
-                    flap_exp[key][key_def][key_force] = (force_coef, force_coef_std)
+    flap_exp = force_coef_dict_maker(flap_config_data, condition_dict)
+    # flap_config_repeats = {}
+    # for key in [0, 5]:
+    #     flap_exp[key] = {}
+    #     for key_def in [5, 17.5]:
+    #         if type(flap_config_data[key][key_def]) == list:
+    #             for key_force in ["drag", "lift", "moment"]:
+    #                 force_list = []
+    #                 force_std_list = []
+    #                 for file in flap_config_data[key][key_def]:
+    #                     test = ExpPostProcess(file, key)
+    #                     force, force_std = test.get_avg(key_force)
+    #                     force_list.append(force)
+    #                     force_std_list.append(force_std)
+    #                 force_avg, force_std_avg = force_repeat_avg_calc(
+    #                     force_list, force_std_list
+    #                 )
+    #                 force_coef, force_coef_std = force_coef_std_calc(
+    #                     condition_dict, force_avg, force_std_avg
+    #                 )
+    #                 flap_config_repeats[key_force] = (force_coef, force_coef_std)
+    #             flap_exp[key][key_def] = flap_config_repeats
+    #         else:
+    #             # if its not a list
+    #             flap_exp[key][key_def] = {}
+    #             for key_force in ["drag", "lift", "moment"]:
+    #                 test = ExpPostProcess(flap_config_data[key][key_def], key)
+    #                 force, force_std = test.get_avg(key_force)
+    #                 force_coef, force_coef_std = force_coef_std_calc(
+    #                     condition_dict, force, force_std
+    #                 )
+    #                 flap_exp[key][key_def][key_force] = (force_coef, force_coef_std)
 
     # %% reading ods for cfd data
     os.chdir("data")
