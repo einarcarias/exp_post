@@ -6,6 +6,7 @@ from statsmodels.tsa.seasonal import STL
 from scipy.fft import fft, fftfreq, ifft
 from scipy.signal import welch
 from scipy.signal import butter, filtfilt
+from scipy import signal
 import numpy as np
 
 
@@ -140,8 +141,39 @@ class ExpPostProcess:
 
     # post proccessing methods starts here
 
+    def filter_data(self, force):
+        data = self.dict_search(force)
+        time = self.get_time_raw()
+        window = 50
+        original_df = pd.DataFrame({"time": time, "data": data})
+        original_avg = original_df["data"].rolling(window=window, center=True).mean()
+        original_avg.fillna(0, inplace=True)
+        original_df["smooth"] = original_avg
+        # filter data
+        filtered_data = self.notch_filter(data, force)
+        filtered_df = pd.DataFrame({"time": time, "data": filtered_data})
+        filtered_avg = filtered_df["data"].rolling(window=window, center=True).mean()
+        filtered_avg.fillna(0, inplace=True)
+        filtered_df["smooth"] = filtered_avg
+        # plot filtered with original
+        fig, ax = plt.subplots(2, 1, figsize=(12, 6))
+        ax[0] = plt.subplot(2, 1, 1)
+        ax[0].plot(time, data, label="Original", c="b")
+        ax[0].set_title("Original Data")
+        ax[0].plot(time, original_df["smooth"], label="Moving Average", c="r")
+        ax[1] = plt.subplot(2, 1, 2)
+        ax[1].plot(time, filtered_data, label="Filtered", c="b")
+        ax[1].set_title("Filtered Data")
+        ax[1].plot(time, filtered_df["smooth"], label="Moving Average", c="r")
+        for i in ax:
+            i.legend()
+            i.set_xlabel("Time")
+            i.set_ylabel(force.capitalize() + " Force (N)")
+        plt.tight_layout()
+        plt.show(block=False)
+
     def find_fft(self, force):
-        self.cut_data(0.040, 0.07)
+        # self.cut_data(0.040, 0.07)
         force_data = self.dict_search(force)
         N = len(force_data)
         Fs = 1 / np.mean(np.diff(self.get_time_raw()))
@@ -171,9 +203,10 @@ class ExpPostProcess:
         # Plot original time series
         plt.figure()
         plt.subplot(3, 1, 1)
-        plt.title("Original Time Series")
+        plt.title(f"Original Time Series ({self.name()}))")
         plt.plot(self.get_time_raw(), force_data)
         plt.xlabel("Time")
+        force = force.capitalize()
         plt.ylabel(force)
 
         # Plot Fourier Transform results
@@ -223,6 +256,24 @@ class ExpPostProcess:
         y = filtfilt(b, a, data)
         return y
 
+    @staticmethod
+    # notch filter
+    def notch_filter(data, force):
+        sampling_rate = 10000  # Hz
+        frequency_select = {
+            "lift": [60, 2805, 2995],
+            "drag": 100,
+            "moment": [3000, 2195, 2805],
+        }[force]
+        signal_data = data.copy()
+        # Design notch filters for specified frequency ranges
+        for freq in frequency_select:
+            b_notch, a_notch = signal.iirnotch(freq, Q=30, fs=sampling_rate)
+            signal_data = signal.filtfilt(b_notch, a_notch, signal_data)
+
+        # Apply the notch filters to the signal data
+        return signal_data
+
 
 class PostPlots:
     def __init__(self, cfd_df, exp_df, exp_df_std):
@@ -266,7 +317,6 @@ class PostPlots:
             c="k",
             label=f"alpha={aoa}(Exp)",
         )
-        print(fin_exp_df_std[force])
         axs[0].errorbar(
             fin_exp_df_data["def"],
             fin_exp_df_data[force],
@@ -513,6 +563,11 @@ if __name__ == "__main__":
         "velocity": (velocity, velocity_std),
         "diameter": (diameter, diameter_std),
     }
+    # %% Tap test
+    tap = ExpPostProcess("tap.csv", 5)
+    tap.find_fft("moment")
+    tap.find_fft("lift")
+    tap.find_fft("drag")
     # using moving average to smooth data
     # test = ExpPostProcess("TR009.csv")
     # test.plot_avg("lift")
@@ -526,10 +581,15 @@ if __name__ == "__main__":
     #         test = ExpPostProcess(bicone_data[bicone_key])
     #         test.plot_avg("lift")
     # test.find_fft("lift")
+    # %% FIlter test
+    fin_filtr = ExpPostProcess("TR012.csv", 0)
+    fin_filtr.filter_data("lift")
+    # %% average plotting
     fins = [ExpPostProcess(file, 0) for file in fin_config_data[0].values()]
     flaps = [ExpPostProcess(file, 0) for file in flap_config_data[0].values()]
     title_fin = ["Fin, AoA = 0, Delta = 0", "Fin, AoA = 0, Delta = 10"]
     title_flap = ["Flap, AoA = 0, Delta = 5", "Flap, AoA = 0, Delta = 17.5"]
+
     compare_avg_plot(*fins, force=["lift", "lift"], title=title_fin, aoa=[0, 0])
     compare_avg_plot(*flaps, force=["lift", "lift"], title=title_flap, aoa=[0, 0])
 
@@ -622,7 +682,9 @@ if __name__ == "__main__":
             record_dict = {
                 "aoa": aoa,
                 "force": force_typ,
-                "force_coef": force_data[0],
+                "force_coef": 0
+                if (aoa == 0 and (force_typ == "lift" or force_typ == "moment"))
+                else force_data[0],
                 "force_coef_std": force_data[1],
             }
             record.append(record_dict)
@@ -645,7 +707,13 @@ if __name__ == "__main__":
                     "aoa": aoa,
                     "def": defl,
                     "force": force_typ,
-                    "force_coef": force_data[0],
+                    "force_coef": 0
+                    if (
+                        aoa == 0
+                        and defl == 0
+                        and (force_typ == "lift" or force_typ == "moment")
+                    )
+                    else force_data[0],
                     "force_coef_std": force_data[1],
                 }
                 record.append(record_dict)
