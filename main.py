@@ -9,16 +9,20 @@ from scipy.signal import butter, filtfilt
 from scipy import signal
 import numpy as np
 
+dir_path = os.path.dirname(os.path.realpath(__file__))
+
 
 class ExpPostProcess:
+    sampling_rate = 1e4
     data_dir = Path("data")
 
-    def __init__(self, filename, aoa):
+    def __init__(self, filename, aoa, label=None):
         self.aoa = aoa
         os.chdir(self.data_dir)
         self.filename = filename
         self.df = pd.read_csv(filename, delimiter="\t")
-        os.chdir("..")
+        self.label = self.name() if label is None else label
+        os.chdir(dir_path)
 
     # getters for raw data
     def get_moment_raw(self):
@@ -176,55 +180,31 @@ class ExpPostProcess:
         # self.cut_data(0.040, 0.07)
         force_data = self.dict_search(force)
         N = len(force_data)
-        Fs = 1 / np.mean(np.diff(self.get_time_raw()))
+        Fs = 1e4
+        b = 5  # window length
+
         T = 1 / Fs
         yf = fft(force_data.to_numpy())[: N // 2] / N
         xf = fftfreq(N, T)[: N // 2]
 
-        # Filter out the frequencies you don't want
-        bot, top = (150, 200)
-        # Create a mask for the frequencies you want to zero out
-        mask = (xf > bot) & (xf < top)  # You can adjust the range here
-        mask = mask | (
-            (xf < -top) & (xf > -top)
-        )  # Also zero out the negative frequencies corresponding to this range
-        yf[mask] = 0
-
-        # using welch method
-        f, Pxx_den = welch(force_data, fs=1 / T, nperseg=256)
-
-        # top bot
-        bot_butter, top_butter = (185, 195)
-        # apply butterworth filter from welch method
-        y_filtered_butter = ExpPostProcess.butter_bandpass_filter(
-            force_data, bot_butter, top_butter, 1 / T, order=6
-        )
-
         # Plot original time series
-        plt.figure()
-        plt.subplot(3, 1, 1)
-        plt.title(f"Original Time Series ({self.name()}))")
-        plt.plot(self.get_time_raw(), force_data)
-        plt.xlabel("Time")
-        force = force.capitalize()
-        plt.ylabel(force)
+        # plt.figure(figsize=(12, 6))
 
-        # Plot Fourier Transform results
-        plt.subplot(3, 1, 2)
-        plt.title("Fourier Transform(Log-Log Scale)")
-        plt.loglog(xf, np.abs(yf))  # plotting include normalization
-        plt.xlabel("Frequency")
-        plt.ylabel("Amplitude")
+        # # Plot Fourier Transform results
+        # plt.subplot(2, 1, 1)
+        # plt.title("Fourier Transform(Log-Log Scale)")
+        # plt.loglog(xf, np.abs(yf))  # plotting include normalization
+        # plt.xlabel("Frequency")
+        # plt.ylabel("Amplitude")
 
-        # plot fourier transform in linear scale
-        plt.subplot(3, 1, 3)
-        plt.title("Fourier Transform(Linear Scale)")
-        plt.plot(xf, np.abs(yf))
-        plt.xlabel("Frequency")
-        plt.ylabel("Amplitude")
-
-        plt.tight_layout()
-        plt.show()
+        # # plot welch method
+        # plt.subplot(2, 1, 2)
+        # plt.title("Welch Method")
+        # plt.loglog(f, Pxx_den, linewidth=0.5)
+        # plt.xlabel("Frequency")
+        # plt.ylabel("PSD")
+        # plt.tight_layout()
+        # plt.show()
 
         # Plot original time series
         # plt.figure()
@@ -240,26 +220,21 @@ class ExpPostProcess:
         # plt.xlabel("Frequency")
         # plt.ylabel("PSD")
 
-    @staticmethod
-    # Function to design Butterworth bandpass filter
-    def butter_bandpass(lowcut, highcut, fs, order=5):
-        nyquist = 0.5 * fs
-        low = lowcut / nyquist
-        high = highcut / nyquist
-        b, a = butter(order, [low, high], btype="band")
-        return b, a
+    def find_welch(self, force):
+        force_data = self.dict_search(force)
+        b = 5
+        f, Pxx_den = welch(
+            force_data - force_data.mean(),
+            fs=self.sampling_rate,
+            nperseg=self.sampling_rate // b,
+        )
+        print(self.label)
 
-    @staticmethod
-    # Function to apply the filter
-    def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
-        b, a = ExpPostProcess.butter_bandpass(lowcut, highcut, fs, order=order)
-        y = filtfilt(b, a, data)
-        return y
+        return pd.DataFrame({"freq": f, "psd": Pxx_den, "label": self.label})
 
     @staticmethod
     # notch filter
     def notch_filter(data, force):
-        sampling_rate = 10000  # Hz
         frequency_select = {
             "lift": [60, 2805, 2995],
             "drag": 100,
@@ -273,6 +248,19 @@ class ExpPostProcess:
 
         # Apply the notch filters to the signal data
         return signal_data
+
+    @staticmethod
+    def plot_freq_domain(data):
+        fig, ax = plt.subplots(figsize=(12, 6))
+        for i in data:
+            ax.loglog(i["freq"], i["psd"], linewidth=1, label=i["label"][0])
+            ax.minorticks_on()
+            ax.grid(which="minor", linestyle=":", linewidth="0.5", color="gray")
+            ax.legend()
+        plt.xlabel("Frequency")
+        plt.ylabel("PSD")
+        plt.tight_layout()
+        plt.show(block=False)
 
 
 class PostPlots:
@@ -563,27 +551,42 @@ if __name__ == "__main__":
         "velocity": (velocity, velocity_std),
         "diameter": (diameter, diameter_std),
     }
-    # %% Tap test
-    tap = ExpPostProcess("tap.csv", 5)
-    tap.find_fft("moment")
-    tap.find_fft("lift")
-    tap.find_fft("drag")
-    # using moving average to smooth data
-    # test = ExpPostProcess("TR009.csv")
-    # test.plot_avg("lift")
-    # for bicone_key in [0, 2, 4, 6]:
-    #     if type(bicone_data[bicone_key]) == list:
-    #         for file in bicone_data[bicone_key]:
-    #             print(file)
-    #             test = ExpPostProcess(file)
-    #             test.plot_avg("lift")
-    #     else:
-    #         test = ExpPostProcess(bicone_data[bicone_key])
-    #         test.plot_avg("lift")
-    # test.find_fft("lift")
-    # %% FIlter test
-    fin_filtr = ExpPostProcess("TR012.csv", 0)
-    fin_filtr.filter_data("lift")
+    # %% frequency domain
+    tap = ExpPostProcess("tap.csv", 5, label="Tap")
+    tap_fft = tap.find_welch("lift")
+    fin_0 = [ExpPostProcess(file, 0) for file in fin_config_data[0].values()]
+    flap_0 = [ExpPostProcess(file, 0) for file in flap_config_data[0].values()]
+    bicone_0 = [ExpPostProcess(file, 0) for file in bicone_data[0]]
+    welch_res_0 = []
+    for i in fin_0:
+        welch_res_0.append(i.find_welch("lift"))
+    for i in flap_0:
+        welch_res_0.append(i.find_welch("lift"))
+    for i in bicone_0:
+        welch_res_0.append(i.find_welch("lift"))
+    welch_res_0.append(tap_fft)
+
+    # other aoa
+    fin_5 = [
+        ExpPostProcess(file, 5) if not isinstance(file, list) else file
+        for sublist in fin_config_data[5].values()
+        for file in (sublist if isinstance(sublist, list) else [sublist])
+    ]
+    flap_5 = [
+        ExpPostProcess(file, 5) if not isinstance(file, list) else file
+        for sublist in flap_config_data[5].values()
+        for file in (sublist if isinstance(sublist, list) else [sublist])
+    ]
+    welch_res_5 = []
+    for i in fin_5:
+        welch_res_5.append(i.find_welch("lift"))
+    for i in flap_5:
+        welch_res_5.append(i.find_welch("lift"))
+    welch_res_5.append(tap_fft)
+    welch_res_5.append(bicone_0[0].find_welch("lift"))
+    welch_res_5.append(fin_0[0].find_welch("lift"))
+    ExpPostProcess.plot_freq_domain(welch_res_0)
+    ExpPostProcess.plot_freq_domain(welch_res_5)
     # %% average plotting
     fins = [ExpPostProcess(file, 0) for file in fin_config_data[0].values()]
     flaps = [ExpPostProcess(file, 0) for file in flap_config_data[0].values()]
