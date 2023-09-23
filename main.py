@@ -1,4 +1,5 @@
 from matplotlib import pyplot as plt
+import matplotlib as mpl
 import pandas as pd
 from pathlib import Path
 import os
@@ -8,6 +9,8 @@ from scipy.signal import welch
 from scipy.signal import butter, filtfilt
 from scipy import signal
 import numpy as np
+import cmasher as cmr
+import random
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -86,6 +89,7 @@ class ExpPostProcess:
         plt.show(block=False)
 
     def name(self):
+        sting_test = {"tap": ["tap.csv", "tap2.csv"], "background": "background.csv"}
         bicone_data = {
             0: ["TR001.csv", "TR007.csv", "TR008.csv"],
             2: ["TR002.csv"],
@@ -94,7 +98,10 @@ class ExpPostProcess:
         }
         fin_config_data = {
             0: {0: "TR009.csv", 10: "TR012.csv"},
-            5: {0: "TR010.csv", 10: ["TR011.csv", "TR021.csv", "TR020.csv"]},
+            5: {
+                0: "TR010.csv",
+                10: ["TR011.csv", "TR021.csv", "TR020.csv", "TR022.csv", "TR023.csv"],
+            },
         }
         flap_config_data = {
             0: {5: "TR013.csv", 17.5: "TR016.csv"},
@@ -251,9 +258,19 @@ class ExpPostProcess:
 
     @staticmethod
     def plot_freq_domain(data):
+        cmap = mpl.colormaps["viridis"]
         fig, ax = plt.subplots(figsize=(12, 6))
         for i in data:
-            ax.loglog(i["freq"], i["psd"], linewidth=1, label=i["label"][0])
+            if i["label"][0] == "Background":
+                # color = "k"
+                lwidth = 1.5
+                ax.loglog(
+                    i["freq"], i["psd"], linewidth=lwidth, label=i["label"][0], c="k"
+                )
+            else:
+                lwidth = 1
+                ax.loglog(i["freq"], i["psd"], linewidth=lwidth, label=i["label"][0])
+                # color = cmap(random.random())
             ax.minorticks_on()
             ax.grid(which="minor", linestyle=":", linewidth="0.5", color="gray")
             ax.legend()
@@ -524,15 +541,19 @@ def force_coef_dict_maker(kargs, condition):
 if __name__ == "__main__":
     # data file dictionary
     # modify accordingly
+    sting_test = {"tap": ["tap.csv", "tap2.csv"], "background": "background.csv"}
     bicone_data = {
         0: ["TR001.csv", "TR007.csv", "TR008.csv"],
-        2: "TR002.csv",
-        4: "TR003.csv",
+        2: ["TR002.csv"],
+        4: ["TR003.csv"],
         6: ["TR004.csv", "TR005.csv", "TR006.csv"],
     }
     fin_config_data = {
         0: {0: "TR009.csv", 10: "TR012.csv"},
-        5: {0: "TR010.csv", 10: ["TR011.csv", "TR021.csv", "TR020.csv"]},
+        5: {
+            0: "TR010.csv",
+            10: ["TR011.csv", "TR021.csv", "TR020.csv", "TR022.csv", "TR023.csv"],
+        },
     }
     flap_config_data = {
         0: {5: "TR013.csv", 17.5: "TR016.csv"},
@@ -552,19 +573,27 @@ if __name__ == "__main__":
         "diameter": (diameter, diameter_std),
     }
     # %% frequency domain
-    tap = ExpPostProcess("tap.csv", 5, label="Tap")
-    tap_fft = tap.find_welch("lift")
+    force_to_check = "lift"
+    tap = [
+        ExpPostProcess(tap_i, 5, label=label_i)
+        for tap_i, label_i in zip(sting_test["tap"], ["Tap 1", "Tap 2"])
+    ]
+    background = ExpPostProcess(sting_test["background"], 0, label="Background")
     fin_0 = [ExpPostProcess(file, 0) for file in fin_config_data[0].values()]
     flap_0 = [ExpPostProcess(file, 0) for file in flap_config_data[0].values()]
     bicone_0 = [ExpPostProcess(file, 0) for file in bicone_data[0]]
+
     welch_res_0 = []
+    tap_fft = [i.find_welch(force_to_check) for i in tap]
+    background_fft = background.find_welch(force_to_check)
+    [welch_res_0.append(i) for i in tap_fft]
+    welch_res_0.append(background_fft)
     for i in fin_0:
-        welch_res_0.append(i.find_welch("lift"))
+        welch_res_0.append(i.find_welch(force_to_check))
     for i in flap_0:
-        welch_res_0.append(i.find_welch("lift"))
+        welch_res_0.append(i.find_welch(force_to_check))
     for i in bicone_0:
-        welch_res_0.append(i.find_welch("lift"))
-    welch_res_0.append(tap_fft)
+        welch_res_0.append(i.find_welch(force_to_check))
 
     # other aoa
     fin_5 = [
@@ -577,14 +606,16 @@ if __name__ == "__main__":
         for sublist in flap_config_data[5].values()
         for file in (sublist if isinstance(sublist, list) else [sublist])
     ]
+
     welch_res_5 = []
     for i in fin_5:
-        welch_res_5.append(i.find_welch("lift"))
+        welch_res_5.append(i.find_welch(force_to_check))
     for i in flap_5:
-        welch_res_5.append(i.find_welch("lift"))
-    welch_res_5.append(tap_fft)
-    welch_res_5.append(bicone_0[0].find_welch("lift"))
-    welch_res_5.append(fin_0[0].find_welch("lift"))
+        welch_res_5.append(i.find_welch(force_to_check))
+    [welch_res_5.append(i) for i in tap_fft]
+    welch_res_5.append(background_fft)
+    welch_res_5.append(bicone_0[0].find_welch(force_to_check))
+    welch_res_5.append(fin_0[0].find_welch(force_to_check))
     ExpPostProcess.plot_freq_domain(welch_res_0)
     ExpPostProcess.plot_freq_domain(welch_res_5)
     # %% average plotting
