@@ -16,11 +16,21 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 
 
 class ExpPostProcess:
-    sampling_rate = 1e4
     data_dir = Path("data")
 
-    def __init__(self, filename, aoa, label=None):
+    def __init__(
+        self,
+        filename,
+        aoa,
+        label=None,
+        sampling_rate=1e4,
+        cutoff_time_range=(None, None),
+        averaging_window=50,
+    ):
         self.aoa = aoa
+        self.averaging_window = averaging_window
+        self.sampling_rate = sampling_rate
+        self.cutoff_time_range = cutoff_time_range
         os.chdir(self.data_dir)
         self.filename = filename
         self.df = pd.read_csv(filename, delimiter="\t")
@@ -48,6 +58,7 @@ class ExpPostProcess:
             2: (0.0460, 0.0645),
             3: (0.0460, 0.0645),
         }[column]
+        self.cutoff_time_range = (min_time, max_time)
         return min_time, max_time
 
     def dict_search(self, force):
@@ -129,11 +140,15 @@ class ExpPostProcess:
     def get_avg(self, force):
         dict = {"moment": 3, "lift": 1, "drag": 2}
         column = dict[force]
-        window = 50
+        window = self.averaging_window
         smooth = self.df.iloc[:, column].rolling(window=window, center=True).mean()
         smooth.fillna(0, inplace=True)
         self.df[f"smooth {dict[force]}"] = smooth
-        min_time, max_time = self.get_minmax(force)
+        min_time, max_time = (
+            self.get_minmax(force)
+            if self.cutoff_time_range == (None, None)
+            else self.cutoff_time_range
+        )
         relevant_data = (self.df.iloc[:, 0] >= min_time) & (
             self.df.iloc[:, 0] <= max_time
         )
@@ -235,7 +250,6 @@ class ExpPostProcess:
             fs=self.sampling_rate,
             nperseg=self.sampling_rate // b,
         )
-        print(self.label)
 
         return pd.DataFrame({"freq": f, "psd": Pxx_den, "label": self.label})
 
@@ -450,8 +464,8 @@ def compare_avg_plot(*args, **kwargs):
         x_label = "Time(S)"
         dict = {"moment": 3, "lift": 1, "drag": 2}
         column = dict[force[i]]
-        min_time, max_time = obj.get_minmax(force[i])
         obj.get_avg(force[i])
+        min_time, max_time = obj.cutoff_time_range
         if not isinstance(obj, ExpPostProcess):
             print(f"Skipping argument {i+1}, not a ExpPostProcess object.")
             continue
@@ -606,6 +620,21 @@ if __name__ == "__main__":
         for sublist in flap_config_data[5].values()
         for file in (sublist if isinstance(sublist, list) else [sublist])
     ]
+    new_data = ExpPostProcess(
+        "TR024.csv",
+        5,
+        label="Fin AoA = 5, Higher Sampling rate",
+        cutoff_time_range=(0.027, 0.0455),
+        sampling_rate=4e4,
+        averaging_window=200,
+    )
+    higher_sampling_data = new_data.find_welch(force_to_check)
+
+    compare_avg_plot(
+        *[new_data, fin_5[1]],
+        force=[force_to_check, force_to_check],
+        title=["40khz", "10khz"],
+    )
 
     welch_res_5 = []
     for i in fin_5:
@@ -613,6 +642,7 @@ if __name__ == "__main__":
     for i in flap_5:
         welch_res_5.append(i.find_welch(force_to_check))
     [welch_res_5.append(i) for i in tap_fft]
+    welch_res_5.append(higher_sampling_data)
     welch_res_5.append(background_fft)
     welch_res_5.append(bicone_0[0].find_welch(force_to_check))
     welch_res_5.append(fin_0[0].find_welch(force_to_check))
