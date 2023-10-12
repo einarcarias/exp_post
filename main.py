@@ -11,6 +11,7 @@ from scipy import signal
 import numpy as np
 import cmasher as cmr
 import random
+import re
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -21,20 +22,23 @@ class ExpPostProcess:
     def __init__(
         self,
         filename,
+        config,
         aoa,
+        deflection,
         label=None,
-        sampling_rate=1e4,
-        cutoff_time_range=(None, None),
-        averaging_window=50,
     ):
-        self.aoa = aoa
-        self.averaging_window = averaging_window
-        self.sampling_rate = sampling_rate
-        self.cutoff_time_range = cutoff_time_range
         os.chdir(self.data_dir)
+        # extract numeric portion of config data name to determine test number
+        self.test_number = int(re.search(r"(\d+)", filename).group(1))
+        self.sampling_rate = 1e4 if self.test_number < 26 else 4e4
+        self.config = config
+        self.aoa = aoa
+        self.deflection = deflection
         self.filename = filename
         self.df = pd.read_csv(filename, delimiter="\t")
         self.label = self.name() if label is None else label
+        self.averaging_window = 50 if self.test_number < 26 else 200
+
         os.chdir(dir_path)
 
     # getters for raw data
@@ -53,12 +57,21 @@ class ExpPostProcess:
     def get_minmax(self, force):
         dict = {"moment": 3, "lift": 1, "drag": 2}
         column = dict[force]
-        min_time, max_time = {
-            1: (0.0495, 0.0645) if self.aoa != 0 else (0.0430, 0.062),
-            2: (0.0460, 0.0645),
-            3: (0.0460, 0.0645),
-        }[column]
-        self.cutoff_time_range = (min_time, max_time)
+        dict_aoa0_time = (
+            {1: (0.0230, 0.0405), 2: (0.0203, 0.0436), 3: (0.0257, 0.0375)}
+            if self.test_number >= 26
+            else {1: (0.0430, 0.062), 2: (0.0460, 0.0645), 3: (0.0460, 0.0645)}
+        )
+        dict_aoa5_time = (
+            {1: (0.0268, 0.0449), 2: (0.0209, 0.0453), 3: (0.0254, 0.0451)}
+            if self.test_number >= 26
+            else {1: (0.0495, 0.0645), 2: (0.0460, 0.0645), 3: (0.0460, 0.0645)}
+        )
+
+        min_time, max_time = (
+            dict_aoa0_time[column] if self.aoa == 0 else dict_aoa5_time[column]
+        )
+
         return min_time, max_time
 
     def dict_search(self, force):
@@ -68,6 +81,19 @@ class ExpPostProcess:
             "drag": self.get_drag_raw(),
         }
         return force_dict[force]
+
+    def plot_raw(self, force):
+        force_name = force
+        force = self.dict_search(force)
+        time = self.get_time_raw()
+        force_avg = force.rolling(window=self.averaging_window, center=True).mean()
+        plt.figure(figsize=(6, 3))
+        plt.plot(time, force)
+        plt.plot(time, force_avg, color="red")
+        plt.xlabel("Time")
+        plt.ylabel(f"{force_name.capitalize()} Force (N/Nm)")
+        plt.grid(which="both")
+        plt.show()
 
     def plot_avg(self, force):
         dict = {"moment": 3, "lift": 1, "drag": 2}
@@ -97,45 +123,10 @@ class ExpPostProcess:
 
         plt.legend()
         plt.tight_layout()
-        plt.show(block=False)
+        plt.show()
 
     def name(self):
-        sting_test = {"tap": ["tap.csv", "tap2.csv"], "background": "background.csv"}
-        bicone_data = {
-            0: ["TR001.csv", "TR007.csv", "TR008.csv"],
-            2: ["TR002.csv"],
-            4: ["TR003.csv"],
-            6: ["TR004.csv", "TR005.csv", "TR006.csv"],
-        }
-        fin_config_data = {
-            0: {0: "TR009.csv", 10: "TR012.csv"},
-            5: {
-                0: "TR010.csv",
-                10: ["TR011.csv", "TR021.csv", "TR020.csv", "TR022.csv", "TR023.csv"],
-            },
-        }
-        flap_config_data = {
-            0: {5: "TR013.csv", 17.5: "TR016.csv"},
-            5: {5: "TR014.csv", 17.5: ["TR015.csv", "TR017.csv", "TR019.csv"]},
-        }
-
-        for aoa, filenames in bicone_data.items():
-            if self.filename in filenames:
-                return f"AoA = {aoa}, Bicone"
-
-        for aoa, delta_data in fin_config_data.items():
-            for delta, filenames in delta_data.items():
-                filenames = filenames if isinstance(filenames, list) else [filenames]
-                if self.filename in filenames:
-                    return f"AoA = {aoa}, Delta = {delta} Fin"
-
-        for aoa, delta_data in flap_config_data.items():
-            for delta, filenames in delta_data.items():
-                filenames = filenames if isinstance(filenames, list) else [filenames]
-                if self.filename in filenames:
-                    return f"AoA = {aoa}, Delta = {delta} Flap"
-
-        return "Unknown"
+        return rf"{self.config}, $\alpha$={self.aoa}, $\delta$ = {self.deflection}"
 
     def get_avg(self, force):
         dict = {"moment": 3, "lift": 1, "drag": 2}
@@ -144,17 +135,16 @@ class ExpPostProcess:
         smooth = self.df.iloc[:, column].rolling(window=window, center=True).mean()
         smooth.fillna(0, inplace=True)
         self.df[f"smooth {dict[force]}"] = smooth
-        min_time, max_time = (
-            self.get_minmax(force)
-            if self.cutoff_time_range == (None, None)
-            else self.cutoff_time_range
-        )
+        min_time, max_time = self.get_minmax(force)
         relevant_data = (self.df.iloc[:, 0] >= min_time) & (
             self.df.iloc[:, 0] <= max_time
         )
         indices = self.df[relevant_data].index
         std = self.df.loc[indices, [f"smooth {dict[force]}"]].std()
         avg_force = self.df.loc[indices, [f"smooth {dict[force]}"]].mean()
+        if (self.aoa == 0 and self.deflection == 0) and (force in ["lift", "moment"]):
+            avg_force = 0
+
         return avg_force, std
 
     def cut_data(self, start_time, end_time):
@@ -421,30 +411,100 @@ class PostPlots_bcone(PostPlots):
         plt.show()
 
 
+# class for error analysis
+class ErrorAnalysis:
+    def __init__(self, ExpPostProcess_object, boundary_conditions):
+        if not isinstance(ExpPostProcess_object, ExpPostProcess):
+            raise TypeError("ExpPostProcess object required.")
+        else:
+            self.ExpPostProcess_object = ExpPostProcess
+        self.rho, self.rho_std = boundary_conditions["rho"]
+        self.velocity, self.velocity_std = boundary_conditions["velocity"]
+        self.diameter, self.diameter_std = boundary_conditions["diameter"]
+
+    def coef_calc(self, force):
+        force_avg, force_std = self.ExpPostProcess_object.get_avg(force)
+        force_coef = force_avg / (
+            0.5 * self.rho * self.velocity**2 * ((np.pi * self.diameter**2 / 4))
+        )
+        term1 = (force_std / force_avg) ** 2
+        term2 = (self.rho_std / self.rho) ** 2
+        term3 = 4 * ((self.velocity_std / self.velocity) ** 2)
+        term4 = 4 * ((self.diameter_std / self.diameter) ** 2)
+        coef_std = force_coef * np.sqrt(term1 + term2 + term3 + term4)
+        return force_coef, coef_std
+
+    @staticmethod
+    def repeat_avg(ErrorAnalysisList):
+        for i in ErrorAnalysisList:
+            if not isinstance(i, ErrorAnalysis):
+                raise TypeError("ErrorAnalysis object required.")
+        force_list = []
+        force_std_list = []
+        for i in ErrorAnalysisList:
+            force_list.append(i.coef_calc()[0])
+            force_std_list.append(i.coef_calc()[1])
+        force_avg = np.mean(force_list)
+        force_std_avg = force_avg * (
+            np.sqrt(np.sum(np.array(force_std_list) ** 2))
+            / np.sum(np.array(force_list))
+        )
+        return force_avg, force_std_avg
+
+
 # %% functions
+def process_data_to_dataframe(config_data, condition_dict, config_name):
+    """
+    Process and organize the data based on angle of attack (aoa), deflection,
+    and force type (drag, lift, moment) and return as a Pandas DataFrame.
 
+    Parameters:
+    - fin_config_data (dict): Dictionary containing data for various configurations.
+    - condition_dict (dict): Dictionary containing conditions for error analysis.
 
-def force_coef_std_calc(param_dict, force, force_std):
-    rho, rho_std = param_dict["rho"]
-    velocity, velocity_std = param_dict["velocity"]
-    diameter, diameter_std = param_dict["diameter"]
-    force_coef = force / (0.5 * rho * velocity**2 * ((np.pi * diameter**2 / 4)))
-    term1 = (force_std / force) ** 2
-    term2 = (rho_std / rho) ** 2
-    term3 = 4 * ((velocity_std / velocity) ** 2)
-    term4 = 4 * ((diameter_std / diameter) ** 2)
+    Returns:
+    - DataFrame: A DataFrame organized by aoa, deflection, force type with processed data.
+    """
 
-    force_coef_std = force_coef * np.sqrt(term1 + term2 + term3 + term4)
+    # List to store processed data
+    data_list = []
 
-    return force_coef, force_coef_std
+    # Loop through each angle of attack (aoa)
+    for aoa in [0, 5]:
+        # Loop through each deflection angle
+        for deflect in [0, 5, 10]:
+            # Loop through each force type: drag, lift, and moment
+            for force in ["drag", "lift", "moment"]:
+                # Check if the data for a given aoa and deflection is a list
+                if type(config_data[aoa][deflect]) == list:
+                    force_coef_list = []
 
+                    # Process each file in the list for the current configuration
+                    for file in config_data[aoa][deflect]:
+                        files = ExpPostProcess(file, config_name, aoa, deflect)
+                        coef = ErrorAnalysis(files, condition_dict)
+                        force_coef_list.append(coef.coef_calc(force))
 
-def force_repeat_avg_calc(force_list, force_std_list):
-    force_avg = np.mean(force_list)
-    force_std_avg = force_avg * (
-        np.sqrt(np.sum(np.array(force_std_list) ** 2)) / np.sum(np.array(force_list))
+                    # Calculate average and standard deviation of force coefficients
+                    force_avg, force_std_avg = ErrorAnalysis.repeat_avg(force_coef_list)
+
+                else:
+                    # Handle case where data for a given aoa and deflection is not a list
+                    file = ExpPostProcess(
+                        config_data[aoa][deflect], config_name, aoa, deflect
+                    )
+                    force_avg, force_std_avg = file.get_avg(force)
+
+                # Append the processed data to the list
+                data_list.append([aoa, deflect, force, force_avg, force_std_avg])
+
+    # Convert the list to a DataFrame
+    df = pd.DataFrame(
+        data_list,
+        columns=["aoa", "deflection", "force type", "average", "std deviation"],
     )
-    return force_avg, force_std_avg
+
+    return df
 
 
 def compare_avg_plot(*args, **kwargs):
@@ -502,56 +562,6 @@ def compare_avg_plot(*args, **kwargs):
     plt.show(block=False)
 
 
-def force_coef_dict_maker(kargs, condition):
-    force_exp = {}
-    for key in kargs.keys():
-        force_exp[key] = {}
-        for key_def in kargs[key].keys():
-            force_exp[key][key_def] = {}
-            if type(kargs[key][key_def]) == list:
-                for key_force in ["drag", "lift", "moment"]:
-                    force_list = []
-                    force_std_list = []
-                    force_coef_list = []
-                    force_std_coef_list = []
-                    for file in kargs[key][key_def]:
-                        # get the force average from time series
-                        test = ExpPostProcess(file, key)
-                        force, force_std = test.get_avg(key_force)
-                        # append to list
-                        force_list.append(force)
-                        force_std_list.append(force_std)
-                        force_coef_temp, force_coef_std_temp = force_coef_std_calc(
-                            condition, force, force_std
-                        )
-                        force_coef_list.append(force_coef_temp)
-                        force_std_coef_list.append(force_coef_std_temp)
-
-                    force_avg, force_std_avg = force_repeat_avg_calc(
-                        force_list, force_std_list
-                    )
-                    force_coef, force_coef_std = force_repeat_avg_calc(
-                        force_coef_list, force_std_coef_list
-                    )
-                    force_exp[key][key_def][key_force] = (
-                        force_coef,
-                        force_coef_std,
-                    )
-            else:
-                # if its not a list
-                for key_force in ["drag", "lift", "moment"]:
-                    test = ExpPostProcess(kargs[key][key_def], key)
-                    force, force_std = test.get_avg(key_force)
-                    force_coef, force_coef_std = force_coef_std_calc(
-                        condition, force, force_std
-                    )
-                    force_exp[key][key_def][key_force] = (
-                        force_coef,
-                        force_coef_std,
-                    )
-    return force_exp
-
-
 if __name__ == "__main__":
     # data file dictionary
     # modify accordingly
@@ -563,15 +573,37 @@ if __name__ == "__main__":
         6: ["TR004.csv", "TR005.csv", "TR006.csv"],
     }
     fin_config_data = {
-        0: {0: "TR009.csv", 10: "TR012.csv"},
+        0: {
+            0: ["TR009.csv", "TR030.csv"],
+            5: ["TR035.csv"],
+            10: ["TR012.csv", "TR026.csv", "TR027.csv"],
+        },  # from 26 onwards its 40khz need to revised the cut off time
         5: {
-            0: "TR010.csv",
-            10: ["TR011.csv", "TR021.csv", "TR020.csv", "TR022.csv", "TR023.csv"],
+            0: ["TR010.csv", "TR029.csv"],
+            5: ["TR036.csv"],
+            10: [
+                "TR011.csv",
+                "TR021.csv",
+                "TR020.csv",
+                "TR022.csv",
+                "TR023.csv",
+                "TR024.csv",
+                "TR025.csv",
+                "TR028.csv",
+            ],
         },
     }
     flap_config_data = {
-        0: {5: "TR013.csv", 17.5: "TR016.csv"},
-        5: {5: "TR014.csv", 17.5: ["TR015.csv", "TR017.csv", "TR019.csv"]},
+        0: {
+            5: ["TR013.csv", "TR031.csv"],
+            10: ["TR038.csv"],
+            17.5: ["TR016.csv", "TR034.csv"],
+        },
+        5: {
+            5: ["TR014.csv", "TR032.csv"],
+            10: ["TR037.csv"],
+            17.5: ["TR015.csv", "TR017.csv", "TR019.csv", "TR033.csv"],
+        },
     }
 
     rho = 0.0371
@@ -586,6 +618,19 @@ if __name__ == "__main__":
         "velocity": (velocity, velocity_std),
         "diameter": (diameter, diameter_std),
     }
+    # %% testing new sampling rate
+    sampling_rate = 4e4
+    test = ExpPostProcess(
+        flap_config_data[0][17.5][1],
+        "Fin",
+        0,
+        17.5,
+    )
+    for force in ["lift", "drag", "moment"]:
+        test.plot_avg(force)
+    # %% post processing coefficients
+    fin_post_df = process_data_to_dataframe(fin_config_data, condition_dict)
+
     # %% frequency domain
     force_to_check = "lift"
     tap = [
