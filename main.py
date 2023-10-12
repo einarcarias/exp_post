@@ -142,8 +142,6 @@ class ExpPostProcess:
         indices = self.df[relevant_data].index
         std = self.df.loc[indices, [f"smooth {dict[force]}"]].std()
         avg_force = self.df.loc[indices, [f"smooth {dict[force]}"]].mean()
-        if (self.aoa == 0 and self.deflection == 0) and (force in ["lift", "moment"]):
-            avg_force = 0
 
         return avg_force, std
 
@@ -417,7 +415,7 @@ class ErrorAnalysis:
         if not isinstance(ExpPostProcess_object, ExpPostProcess):
             raise TypeError("ExpPostProcess object required.")
         else:
-            self.ExpPostProcess_object = ExpPostProcess
+            self.ExpPostProcess_object = ExpPostProcess_object
         self.rho, self.rho_std = boundary_conditions["rho"]
         self.velocity, self.velocity_std = boundary_conditions["velocity"]
         self.diameter, self.diameter_std = boundary_conditions["diameter"]
@@ -435,15 +433,15 @@ class ErrorAnalysis:
         return force_coef, coef_std
 
     @staticmethod
-    def repeat_avg(ErrorAnalysisList):
+    def repeat_avg(ErrorAnalysisList, force):
         for i in ErrorAnalysisList:
             if not isinstance(i, ErrorAnalysis):
                 raise TypeError("ErrorAnalysis object required.")
         force_list = []
         force_std_list = []
         for i in ErrorAnalysisList:
-            force_list.append(i.coef_calc()[0])
-            force_std_list.append(i.coef_calc()[1])
+            force_list.append(i.coef_calc(force)[0])
+            force_std_list.append(i.coef_calc(force)[1])
         force_avg = np.mean(force_list)
         force_std_avg = force_avg * (
             np.sqrt(np.sum(np.array(force_std_list) ** 2))
@@ -483,10 +481,12 @@ def process_data_to_dataframe(config_data, condition_dict, config_name):
                     for file in config_data[aoa][deflect]:
                         files = ExpPostProcess(file, config_name, aoa, deflect)
                         coef = ErrorAnalysis(files, condition_dict)
-                        force_coef_list.append(coef.coef_calc(force))
+                        force_coef_list.append(coef)
 
                     # Calculate average and standard deviation of force coefficients
-                    force_avg, force_std_avg = ErrorAnalysis.repeat_avg(force_coef_list)
+                    force_avg, force_std_avg = ErrorAnalysis.repeat_avg(
+                        force_coef_list, force
+                    )
 
                 else:
                     # Handle case where data for a given aoa and deflection is not a list
@@ -496,6 +496,9 @@ def process_data_to_dataframe(config_data, condition_dict, config_name):
                     force_avg, force_std_avg = file.get_avg(force)
 
                 # Append the processed data to the list
+
+                if (aoa == 0 and deflect == 0) and (force in ["lift", "moment"]):
+                    force_avg = 0
                 data_list.append([aoa, deflect, force, force_avg, force_std_avg])
 
     # Convert the list to a DataFrame
@@ -621,7 +624,7 @@ if __name__ == "__main__":
     # %% testing new sampling rate
     sampling_rate = 4e4
     test = ExpPostProcess(
-        flap_config_data[0][17.5][1],
+        flap_config_data[0][17.5][0],
         "Fin",
         0,
         17.5,
@@ -629,7 +632,7 @@ if __name__ == "__main__":
     for force in ["lift", "drag", "moment"]:
         test.plot_avg(force)
     # %% post processing coefficients
-    fin_post_df = process_data_to_dataframe(fin_config_data, condition_dict)
+    fin_post_df = process_data_to_dataframe(fin_config_data, condition_dict, "Fin")
 
     # %% frequency domain
     force_to_check = "lift"
