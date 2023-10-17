@@ -12,6 +12,8 @@ import numpy as np
 import cmasher as cmr
 import random
 import re
+from typing import Dict, Union, List
+
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -29,17 +31,24 @@ class ExpPostProcess:
     ):
         os.chdir(self.data_dir)
         # extract numeric portion of config data name to determine test number
-        self.test_number = int(re.search(r"(\d+)", filename).group(1))
-        self.sampling_rate = 1e4 if self.test_number < 26 else 4e4
-        self.config = config
+        self.config = config.capitalize()
         self.aoa = aoa
         self.deflection = deflection
         self.filename = filename
         self.df = pd.read_csv(filename, delimiter="\t")
+        self.test_type()
+        self.sampling_rate = self.get_sampling_rate()
+        self.averaging_window = 80 if self.sampling_rate < 10006 else 200
         self.label = self.name() if label is None else label
-        self.averaging_window = 50 if self.test_number < 26 else 200
 
         os.chdir(dir_path)
+
+    # determine if test is bicone background tap or fin, flap
+    def test_type(self):
+        if self.config not in ["Fin", "Flap"]:
+            self.test_number = None
+        else:
+            self.test_number = int(re.search(r"(\d+)", self.filename).group(1))
 
     # getters for raw data
     def get_moment_raw(self):
@@ -51,6 +60,10 @@ class ExpPostProcess:
     def get_time_raw(self):
         return self.df.iloc[:, 0]
 
+    def get_sampling_rate(self):
+        time = self.get_time_raw()
+        return int(len(time) / (time.iloc[-1] - time.iloc[0]))
+
     def get_drag_raw(self):
         return self.df.iloc[:, 2]
 
@@ -59,12 +72,12 @@ class ExpPostProcess:
         column = dict[force]
         dict_aoa0_time = (
             {1: (0.0230, 0.0405), 2: (0.0203, 0.0436), 3: (0.0257, 0.0375)}
-            if self.test_number >= 26
+            if self.test_number >= 24
             else {1: (0.0430, 0.062), 2: (0.0460, 0.0645), 3: (0.0460, 0.0645)}
         )
         dict_aoa5_time = (
             {1: (0.0268, 0.0449), 2: (0.0209, 0.0453), 3: (0.0254, 0.0451)}
-            if self.test_number >= 26
+            if self.test_number >= 24
             else {1: (0.0495, 0.0645), 2: (0.0460, 0.0645), 3: (0.0460, 0.0645)}
         )
 
@@ -91,7 +104,9 @@ class ExpPostProcess:
         plt.plot(time, force)
         plt.plot(time, force_avg, color="red")
         plt.xlabel("Time")
-        plt.ylabel(f"{force_name.capitalize()} Force (N/Nm)")
+        plt.ylabel(
+            f"{force.capitalize()} Force ({'N' if force in ['lift','drag'] else 'Nm'})"
+        )
         plt.grid(which="both")
         plt.show()
 
@@ -117,8 +132,10 @@ class ExpPostProcess:
         )
         plt.axvline(x=min_time, color="black", linestyle="--")
         plt.axvline(x=max_time, color="black", linestyle="--")
-        plt.xlabel("Time")
-        plt.ylabel("Value")
+        plt.xlabel("Time(s)")
+        plt.ylabel(
+            f"{force.capitalize()} Force ({'N' if force in ['lift','drag'] else 'Nm'})"
+        )
         plt.title(f"Centered Moving Average Smoothing for {self.name()}")
 
         plt.legend()
@@ -155,81 +172,6 @@ class ExpPostProcess:
 
     # post proccessing methods starts here
 
-    def filter_data(self, force):
-        data = self.dict_search(force)
-        time = self.get_time_raw()
-        window = 50
-        original_df = pd.DataFrame({"time": time, "data": data})
-        original_avg = original_df["data"].rolling(window=window, center=True).mean()
-        original_avg.fillna(0, inplace=True)
-        original_df["smooth"] = original_avg
-        # filter data
-        filtered_data = self.notch_filter(data, force)
-        filtered_df = pd.DataFrame({"time": time, "data": filtered_data})
-        filtered_avg = filtered_df["data"].rolling(window=window, center=True).mean()
-        filtered_avg.fillna(0, inplace=True)
-        filtered_df["smooth"] = filtered_avg
-        # plot filtered with original
-        fig, ax = plt.subplots(2, 1, figsize=(12, 6))
-        ax[0] = plt.subplot(2, 1, 1)
-        ax[0].plot(time, data, label="Original", c="b")
-        ax[0].set_title("Original Data")
-        ax[0].plot(time, original_df["smooth"], label="Moving Average", c="r")
-        ax[1] = plt.subplot(2, 1, 2)
-        ax[1].plot(time, filtered_data, label="Filtered", c="b")
-        ax[1].set_title("Filtered Data")
-        ax[1].plot(time, filtered_df["smooth"], label="Moving Average", c="r")
-        for i in ax:
-            i.legend()
-            i.set_xlabel("Time")
-            i.set_ylabel(force.capitalize() + " Force (N)")
-        plt.tight_layout()
-        plt.show(block=False)
-
-    def find_fft(self, force):
-        # self.cut_data(0.040, 0.07)
-        force_data = self.dict_search(force)
-        N = len(force_data)
-        Fs = 1e4
-        b = 5  # window length
-
-        T = 1 / Fs
-        yf = fft(force_data.to_numpy())[: N // 2] / N
-        xf = fftfreq(N, T)[: N // 2]
-
-        # Plot original time series
-        # plt.figure(figsize=(12, 6))
-
-        # # Plot Fourier Transform results
-        # plt.subplot(2, 1, 1)
-        # plt.title("Fourier Transform(Log-Log Scale)")
-        # plt.loglog(xf, np.abs(yf))  # plotting include normalization
-        # plt.xlabel("Frequency")
-        # plt.ylabel("Amplitude")
-
-        # # plot welch method
-        # plt.subplot(2, 1, 2)
-        # plt.title("Welch Method")
-        # plt.loglog(f, Pxx_den, linewidth=0.5)
-        # plt.xlabel("Frequency")
-        # plt.ylabel("PSD")
-        # plt.tight_layout()
-        # plt.show()
-
-        # Plot original time series
-        # plt.figure()
-        # plt.subplot(2, 1, 1)
-        # plt.title("Original Time Series")
-        # plt.plot(self.get_time_raw(), force_data)
-        # plt.xlabel("Time")
-        # plt.ylabel(force)
-        # # plot welch method
-        # plt.subplot(2, 1, 2)
-        # plt.title("Welch Method")
-        # plt.loglog(f, Pxx_den)
-        # plt.xlabel("Frequency")
-        # plt.ylabel("PSD")
-
     def find_welch(self, force):
         force_data = self.dict_search(force)
         b = 5
@@ -239,39 +181,29 @@ class ExpPostProcess:
             nperseg=self.sampling_rate // b,
         )
 
-        return pd.DataFrame({"freq": f, "psd": Pxx_den, "label": self.label})
-
-    @staticmethod
-    # notch filter
-    def notch_filter(data, force):
-        frequency_select = {
-            "lift": [60, 2805, 2995],
-            "drag": 100,
-            "moment": [3000, 2195, 2805],
-        }[force]
-        signal_data = data.copy()
-        # Design notch filters for specified frequency ranges
-        for freq in frequency_select:
-            b_notch, a_notch = signal.iirnotch(freq, Q=30, fs=sampling_rate)
-            signal_data = signal.filtfilt(b_notch, a_notch, signal_data)
-
-        # Apply the notch filters to the signal data
-        return signal_data
+        return pd.DataFrame(
+            {"freq": f, "psd": Pxx_den, "label": self.label, "config": self.config}
+        )
 
     @staticmethod
     def plot_freq_domain(data):
         cmap = mpl.colormaps["viridis"]
         fig, ax = plt.subplots(figsize=(12, 6))
         for i in data:
-            if i["label"][0] == "Background":
+            if i["config"][0] in ["Background", "Tap 1", "Tap 2"]:
                 # color = "k"
                 lwidth = 1.5
-                ax.loglog(
-                    i["freq"], i["psd"], linewidth=lwidth, label=i["label"][0], c="k"
-                )
+                ax.loglog(i["freq"], i["psd"], linewidth=lwidth, label=i["label"][0])
+                print("trigger")
             else:
                 lwidth = 1
-                ax.loglog(i["freq"], i["psd"], linewidth=lwidth, label=i["label"][0])
+                ax.loglog(
+                    i["freq"],
+                    i["psd"],
+                    linewidth=lwidth,
+                    label=i["label"][0],
+                    alpha=0.3,
+                )
                 # color = cmap(random.random())
             ax.minorticks_on()
             ax.grid(which="minor", linestyle=":", linewidth="0.5", color="gray")
@@ -279,90 +211,101 @@ class ExpPostProcess:
         plt.xlabel("Frequency")
         plt.ylabel("PSD")
         plt.tight_layout()
-        plt.show(block=False)
+        plt.show(block=True)
 
 
 class PostPlots:
-    def __init__(self, cfd_df, exp_df, exp_df_std):
-        self.cfd_fin_df = cfd_df[0]
-        self.cfd_flap_df = cfd_df[1]
-        self.exp_flap_df = exp_df[1]
-        self.exp_fin_df = exp_df[0]
-        self.exp_flap_df_std = exp_df_std[1]
-        self.exp_fin_df_std = exp_df_std[0]
+    """
+    A class for creating scatter plots with error bars for CFD and experimental data.
 
-    def dict_search(self, force):
-        force_dict = {
+    Args:
+        cfd_df (pd.DataFrame): A DataFrame containing CFD data.
+        exp_df (pd.DataFrame): A DataFrame containing experimental data.
+
+    Attributes:
+        cfd_df (pd.DataFrame): A DataFrame containing CFD data.
+        exp_df (pd.DataFrame): A DataFrame containing experimental data.
+    """
+
+    def __init__(self, cfd_df: pd.DataFrame, exp_df: pd.DataFrame):
+        self.cfd_df = cfd_df
+        self.exp_df = exp_df
+
+    def dict_search(self, force: str) -> str:
+        """
+        Search for the corresponding force abbreviation based on the force name.
+
+        Args:
+            force (str): The name of the force ("moment", "lift", or "drag").
+
+        Returns:
+            str: The corresponding force abbreviation ("CM", "CL", or "CD").
+        """
+        force_dict: Dict[str, str] = {
             "moment": "CM",
             "lift": "CL",
             "drag": "CD",
         }
         return force_dict[force]
 
-    def plot_aoa(self, aoa, force):
-        # data sort
-        fin_cfd = self.cfd_fin_df.query(f"aoa == {str(aoa)}")
-        fin_exp_df_data = self.exp_fin_df.query(f"aoa == {str(aoa)}")
-        fin_exp_df_std = self.exp_fin_df_std.query(f"aoa == {str(aoa)}")
+    def plot_aoa(self, aoa_values: Union[float, List[float]], force: str) -> None:
+        """
+        Plot scatter plots with error bars for angle of attack (aoa) value(s)
+        and a specified force type.
 
-        flap_cfd = self.cfd_flap_df.query(f"aoa == {str(aoa)}")
-        flap_exp_df_data = self.exp_flap_df.query(f"aoa == {str(aoa)}")
-        flap_exp_df_std = self.exp_flap_df_std.query(f"aoa == {str(aoa)}")
+        Args:
+            aoa_values (Union[float, List[float]]): A single angle of attack (aoa) value or a list of aoa values.
+            force (str): The force type ("moment", "lift", or "drag").
 
-        fig, axs = plt.subplots(1, 2, figsize=(12, 6))
-        axs[0].scatter(
-            fin_cfd["def"],
-            fin_cfd[self.dict_search(force)],
-            marker="o",
-            c="r",
-            label=f"alpha={aoa}(CFD)",
-        )
-        axs[0].scatter(
-            fin_exp_df_data["def"],
-            fin_exp_df_data[force],
-            marker="s",
-            c="k",
-            label=f"alpha={aoa}(Exp)",
-        )
-        axs[0].errorbar(
-            fin_exp_df_data["def"],
-            fin_exp_df_data[force],
-            yerr=fin_exp_df_std[force],
-            fmt="none",
-            c="k",
-            capsize=5,
-        )
-        axs[0].set_title("Fin")
-        axs[1].set_title("Flap")
-        axs[1].scatter(
-            flap_cfd["def"],
-            flap_cfd[self.dict_search(force)],
-            marker="o",
-            c="r",
-            label=f"alpha={aoa}(CFD)",
-        )
-        axs[1].scatter(
-            flap_exp_df_data["def"],
-            flap_exp_df_data[force],
-            marker="s",
-            c="k",
-            label=f"alpha={aoa}(Exp)",
-        )
-        axs[1].errorbar(
-            flap_exp_df_data["def"],
-            flap_exp_df_data[force],
-            yerr=flap_exp_df_std[force],
-            fmt="none",
-            c="k",
-            capsize=5,
-        )
-        for ax in axs:
-            ax.set_xlabel("Deflection Angle (deg)")
-            ax.set_ylabel(f"{force.capitalize()} Coefficient")
-            ax.set_ylim(0, 0.3)
-            ax.legend()
+        Returns:
+            None
+        """
+        force_target: str = self.dict_search(force)
+
+        # Ensure aoa_values is a list
+        if isinstance(aoa_values, (int, float)):
+            aoa_values = [aoa_values]
+        max_val = self.cfd_df[f"{force_target}"].max() + 0.05
+        min_val = self.cfd_df[f"{force_target}"].min() - 0.05
+        fig, axs = plt.subplots(figsize=(12, 6))
+
+        for aoa in aoa_values:
+            marker_choice = ["o", "s", "^", "v", "D", "P", "X", "d"]
+            marker = random.choice(marker_choice)
+            # Data sort
+            cfd = self.cfd_df.query(f"aoa == {str(aoa)}")
+            exp = self.exp_df.query(f"aoa == {str(aoa)} and force == '{force_target}'")
+
+            axs.scatter(
+                cfd["deflection"],
+                cfd[force_target],
+                marker=marker,
+                c="r",
+                label=f"alpha={aoa}(CFD)",
+            )
+            axs.scatter(
+                exp["deflection"],
+                exp["avg"],
+                marker=marker,
+                c="k",
+                label=f"alpha={aoa}(Exp)",
+            )
+            axs.errorbar(
+                exp["deflection"],
+                exp["avg"],
+                yerr=exp["std"],
+                fmt="none",
+                c="k",
+                capsize=5,
+            )
+
+        axs.set_xlabel("Deflection Angle (deg)")
+        axs.set_ylabel(f"{force.capitalize()} Coefficient")
+        axs.set_ylim(min_val, max_val)
+        axs.legend()
+        axs.grid(which="both")
         fig.tight_layout()
-        plt.show(block=False)
+        plt.show(block=True)
 
 
 class PostPlots_bcone(PostPlots):
@@ -405,8 +348,8 @@ class PostPlots_bcone(PostPlots):
         axs.set_ylabel(f"{force.capitalize()} Coefficient")
         axs.set_ylim(0, 0.3)
         axs.legend()
+        fig.show()
         fig.tight_layout()
-        plt.show()
 
 
 # class for error analysis
@@ -429,7 +372,7 @@ class ErrorAnalysis:
         term2 = (self.rho_std / self.rho) ** 2
         term3 = 4 * ((self.velocity_std / self.velocity) ** 2)
         term4 = 4 * ((self.diameter_std / self.diameter) ** 2)
-        coef_std = force_coef * np.sqrt(term1 + term2 + term3 + term4)
+        coef_std = np.sqrt(term1 + term2 + term3 + term4) * force_coef
         return force_coef, coef_std
 
     @staticmethod
@@ -443,10 +386,12 @@ class ErrorAnalysis:
             force_list.append(i.coef_calc(force)[0])
             force_std_list.append(i.coef_calc(force)[1])
         force_avg = np.mean(force_list)
-        force_std_avg = force_avg * (
-            np.sqrt(np.sum(np.array(force_std_list) ** 2))
-            / np.sum(np.array(force_list))
+        force_mat = np.array(force_list)
+        force_std_mat = np.array(force_std_list)
+        force_std_avg = (
+            np.sqrt(np.sum(force_std_mat) ** 2) / np.sum(force_mat) * force_avg
         )
+
         return force_avg, force_std_avg
 
 
@@ -463,14 +408,16 @@ def process_data_to_dataframe(config_data, condition_dict, config_name):
     Returns:
     - DataFrame: A DataFrame organized by aoa, deflection, force type with processed data.
     """
+    # force dictiory
+    force_dict = {"moment": "CM", "lift": "CL", "drag": "CD"}
 
     # List to store processed data
     data_list = []
 
     # Loop through each angle of attack (aoa)
-    for aoa in [0, 5]:
+    for aoa in config_data.keys():
         # Loop through each deflection angle
-        for deflect in [0, 5, 10]:
+        for deflect in config_data[aoa].keys():
             # Loop through each force type: drag, lift, and moment
             for force in ["drag", "lift", "moment"]:
                 # Check if the data for a given aoa and deflection is a list
@@ -493,18 +440,21 @@ def process_data_to_dataframe(config_data, condition_dict, config_name):
                     file = ExpPostProcess(
                         config_data[aoa][deflect], config_name, aoa, deflect
                     )
-                    force_avg, force_std_avg = file.get_avg(force)
+                    coef = ErrorAnalysis(file, condition_dict)
+                    force_avg, force_std_avg = ErrorAnalysis.repeat_avg([coef], force)
 
                 # Append the processed data to the list
 
                 if (aoa == 0 and deflect == 0) and (force in ["lift", "moment"]):
                     force_avg = 0
-                data_list.append([aoa, deflect, force, force_avg, force_std_avg])
+                data_list.append(
+                    [aoa, deflect, force_dict[force], force_avg, force_std_avg]
+                )
 
     # Convert the list to a DataFrame
     df = pd.DataFrame(
         data_list,
-        columns=["aoa", "deflection", "force type", "average", "std deviation"],
+        columns=["aoa", "deflection", "force", "avg", "std"],
     )
 
     return df
@@ -610,46 +560,118 @@ if __name__ == "__main__":
     }
 
     rho = 0.0371
-    rho_std = (7.1 / 100) * rho  # in percent
+    rho_std = 7.1 / 100 * rho  # in percent
     velocity = 1553
     velocity_std = 1.6 / 100 * velocity  # in percent
     diameter = 0.06
-    diameter_std = 0.0005
+    diameter_std = np.sqrt(0.0005 / diameter) ** 2 * diameter
     # put all conditions in a dictionary
     condition_dict = {
         "rho": (rho, rho_std),
         "velocity": (velocity, velocity_std),
         "diameter": (diameter, diameter_std),
     }
-    # %% testing new sampling rate
-    sampling_rate = 4e4
-    test = ExpPostProcess(
-        flap_config_data[0][17.5][0],
-        "Fin",
+
+    # %% testing aoa= 5, d = 10 for fin config
+    fin_0_5 = ExpPostProcess(
+        fin_config_data[0][5][0],
+        "fin",
         0,
-        17.5,
+        5,
+    ).plot_avg("drag")
+    flap_0_10 = ExpPostProcess(flap_config_data[0][10][0], "flap", 0, 10).plot_avg(
+        "drag"
     )
-    for force in ["lift", "drag", "moment"]:
-        test.plot_avg(force)
     # %% post processing coefficients
     fin_post_df = process_data_to_dataframe(fin_config_data, condition_dict, "Fin")
+    flap_post_df = process_data_to_dataframe(flap_config_data, condition_dict, "Flap")
+
+    ## add deflection 0 values of fin to flaps
+    flap_post_df = pd.concat(
+        [flap_post_df, fin_post_df.query("deflection == 0")], ignore_index=True
+    )
+
+    # %% sort out cfd data
+    os.chdir("data")
+    cfd_fin = [
+        pd.read_excel(f"mach8_SST_{force}_adapt.xlsx", sheet_name="fin", index_col=0)
+        .reset_index()
+        .melt(id_vars=["index"], var_name="deflection", value_name=force)
+        for force in ["CL", "CD", "CM"]
+    ]
+    # Merge the dataframes using the index and deflection columns
+    cfd_fin = (
+        cfd_fin[0]
+        .merge(cfd_fin[1], on=["index", "deflection"])
+        .merge(cfd_fin[2], on=["index", "deflection"])
+    )
+    cfd_fin.rename(columns={"index": "aoa"}, inplace=True)
+
+    # now for flaps
+    cfd_flap = [
+        pd.read_excel(f"mach8_SST_{force}_adapt.xlsx", sheet_name="flap", index_col=0)
+        .reset_index()
+        .melt(id_vars=["index"], var_name="deflection", value_name=force)
+        for force in ["CL", "CD", "CM"]
+    ]
+    cfd_flap = (cfd_flap[0].merge(cfd_flap[1], on=["index", "deflection"])).merge(
+        cfd_flap[2], on=["index", "deflection"]
+    )
+    cfd_flap.rename(columns={"index": "aoa"}, inplace=True)
+
+    os.chdir("..")
+    # %% testing out plotting results
+    # fin
+    fin_plot = PostPlots(cfd_fin, fin_post_df)
+    fin_plot.plot_aoa([0, 5], "lift")
+    fin_plot.plot_aoa([0, 5], "drag")
+    # flap
+    flap_plot = PostPlots(cfd_flap, flap_post_df)
+    flap_plot.plot_aoa([0, 5], "lift")
+    flap_plot.plot_aoa([0, 5], "drag")
 
     # %% frequency domain
     force_to_check = "lift"
     tap = [
-        ExpPostProcess(tap_i, 5, label=label_i)
-        for tap_i, label_i in zip(sting_test["tap"], ["Tap 1", "Tap 2"])
+        ExpPostProcess(tap_i, config_i, "N/A", "N/A")
+        for tap_i, config_i in zip(sting_test["tap"], ["Tap 1", "Tap 2"])
     ]
-    background = ExpPostProcess(sting_test["background"], 0, label="Background")
-    fin_0 = [ExpPostProcess(file, 0) for file in fin_config_data[0].values()]
-    flap_0 = [ExpPostProcess(file, 0) for file in flap_config_data[0].values()]
-    bicone_0 = [ExpPostProcess(file, 0) for file in bicone_data[0]]
+    background = ExpPostProcess(sting_test["background"], "Background", "N/A", "N/A")
+
+    fin_0 = {
+        keys: [
+            ExpPostProcess(file, "Fin", 0, keys) for file in fin_config_data[0][keys]
+        ]
+        for keys in fin_config_data[0].keys()
+    }
+
+    flap_0 = {
+        keys: [
+            ExpPostProcess(file, "Flap", 0, keys) for file in flap_config_data[0][keys]
+        ]
+        for keys in flap_config_data[0].keys()
+    }
+    bicone_0 = [ExpPostProcess(file, "Bicone", 0, "N/A") for file in bicone_data[0]]
+
+    def flatten(d):
+        res = []  # Result list
+        if isinstance(d, dict):
+            for key, val in d.items():
+                res.extend(flatten(val))
+        elif isinstance(d, list):
+            res = d
+        else:
+            raise TypeError("Undefined type for flatten: %s" % type(d))
+
+        return res
 
     welch_res_0 = []
     tap_fft = [i.find_welch(force_to_check) for i in tap]
     background_fft = background.find_welch(force_to_check)
     [welch_res_0.append(i) for i in tap_fft]
     welch_res_0.append(background_fft)
+    fin_0 = flatten(fin_0)
+    flap_0 = flatten(flap_0)
     for i in fin_0:
         welch_res_0.append(i.find_welch(force_to_check))
     for i in flap_0:
@@ -658,218 +680,41 @@ if __name__ == "__main__":
         welch_res_0.append(i.find_welch(force_to_check))
 
     # other aoa
-    fin_5 = [
-        ExpPostProcess(file, 5) if not isinstance(file, list) else file
-        for sublist in fin_config_data[5].values()
-        for file in (sublist if isinstance(sublist, list) else [sublist])
-    ]
-    flap_5 = [
-        ExpPostProcess(file, 5) if not isinstance(file, list) else file
-        for sublist in flap_config_data[5].values()
-        for file in (sublist if isinstance(sublist, list) else [sublist])
-    ]
-    new_data = ExpPostProcess(
-        "TR024.csv",
-        5,
-        label="Fin AoA = 5, Higher Sampling rate",
-        cutoff_time_range=(0.027, 0.0455),
-        sampling_rate=4e4,
-        averaging_window=200,
-    )
-    higher_sampling_data = new_data.find_welch(force_to_check)
+    # fin_5 = [
+    #     ExpPostProcess(file, 5) if not isinstance(file, list) else file
+    #     for sublist in fin_config_data[5].values()
+    #     for file in (sublist if isinstance(sublist, list) else [sublist])
+    # ]
+    # flap_5 = [
+    #     ExpPostProcess(file, 5) if not isinstance(file, list) else file
+    #     for sublist in flap_config_data[5].values()
+    #     for file in (sublist if isinstance(sublist, list) else [sublist])
+    # ]
+    # new_data = ExpPostProcess(
+    #     "TR024.csv",
+    #     5,
+    #     label="Fin AoA = 5, Higher Sampling rate",
+    #     cutoff_time_range=(0.027, 0.0455),
+    #     sampling_rate=4e4,
+    #     averaging_window=200,
+    # )
+    # higher_sampling_data = new_data.find_welch(force_to_check)
 
-    compare_avg_plot(
-        *[new_data, fin_5[1]],
-        force=[force_to_check, force_to_check],
-        title=["40khz", "10khz"],
-    )
+    # compare_avg_plot(
+    # *[new_data, fin_5[1]],
+    #     force=[force_to_check, force_to_check],
+    #     title=["40khz", "10khz"],
+    # )
 
-    welch_res_5 = []
-    for i in fin_5:
-        welch_res_5.append(i.find_welch(force_to_check))
-    for i in flap_5:
-        welch_res_5.append(i.find_welch(force_to_check))
-    [welch_res_5.append(i) for i in tap_fft]
-    welch_res_5.append(higher_sampling_data)
-    welch_res_5.append(background_fft)
-    welch_res_5.append(bicone_0[0].find_welch(force_to_check))
-    welch_res_5.append(fin_0[0].find_welch(force_to_check))
+    # welch_res_5 = []
+    # for i in fin_5:
+    #     welch_res_5.append(i.find_welch(force_to_check))
+    # for i in flap_5:
+    #     welch_res_5.append(i.find_welch(force_to_check))
+    # [welch_res_5.append(i) for i in tap_fft]
+    # welch_res_5.append(higher_sampling_data)
+    # welch_res_5.append(background_fft)
+    # welch_res_5.append(bicone_0[0].find_welch(force_to_check))
+    # welch_res_5.append(fin_0[0].find_welch(force_to_check))
     ExpPostProcess.plot_freq_domain(welch_res_0)
-    ExpPostProcess.plot_freq_domain(welch_res_5)
-    # %% average plotting
-    fins = [ExpPostProcess(file, 0) for file in fin_config_data[0].values()]
-    flaps = [ExpPostProcess(file, 0) for file in flap_config_data[0].values()]
-    title_fin = ["Fin, AoA = 0, Delta = 0", "Fin, AoA = 0, Delta = 10"]
-    title_flap = ["Flap, AoA = 0, Delta = 5", "Flap, AoA = 0, Delta = 17.5"]
-
-    compare_avg_plot(*fins, force=["lift", "lift"], title=title_fin, aoa=[0, 0])
-    compare_avg_plot(*flaps, force=["lift", "lift"], title=title_flap, aoa=[0, 0])
-
-    # %% processing repeats
-    # bicone
-    bicone_exp = {}
-    bicone_repeats = {}
-
-    for key in [0, 2, 4, 6]:
-        if type(bicone_data[key]) == list:
-            bicone_exp[key] = {}
-            bicone_repeats = {}
-            for key_force in ["drag", "lift", "moment"]:
-                force_list = []
-                force_std_list = []
-                for file in bicone_data[key]:
-                    test = ExpPostProcess(file, key)
-                    force, force_std = test.get_avg(key_force)
-                    force_list.append(force)
-                    force_std_list.append(force_std)
-                force_avg, force_std_avg = force_repeat_avg_calc(
-                    force_list, force_std_list
-                )
-                force_coef, force_coef_std = force_coef_std_calc(
-                    condition_dict, force_avg, force_std_avg
-                )
-                bicone_repeats[key_force] = (force_coef, force_coef_std)
-            bicone_exp[key] = bicone_repeats
-        else:
-            # if its not a list
-            bicone_exp[key] = {}
-            for key_force in ["drag", "lift", "moment"]:
-                test = ExpPostProcess(bicone_data[key], key)
-                force, force_std = test.get_avg(key_force)
-                force_coef, force_coef_std = force_coef_std_calc(
-                    condition_dict, force, force_std
-                )
-                bicone_exp[key][key_force] = (force_coef, force_coef_std)
-
-    # fin config
-    fin_exp = force_coef_dict_maker(fin_config_data, condition_dict)
-    fin_config_repeats = {}
-
-    # flap config
-    flap_exp = force_coef_dict_maker(flap_config_data, condition_dict)
-    # flap_config_repeats = {}
-    # for key in [0, 5]:
-    #     flap_exp[key] = {}
-    #     for key_def in [5, 17.5]:
-    #         if type(flap_config_data[key][key_def]) == list:
-    #             for key_force in ["drag", "lift", "moment"]:
-    #                 force_list = []
-    #                 force_std_list = []
-    #                 for file in flap_config_data[key][key_def]:
-    #                     test = ExpPostProcess(file, key)
-    #                     force, force_std = test.get_avg(key_force)
-    #                     force_list.append(force)
-    #                     force_std_list.append(force_std)
-    #                 force_avg, force_std_avg = force_repeat_avg_calc(
-    #                     force_list, force_std_list
-    #                 )
-    #                 force_coef, force_coef_std = force_coef_std_calc(
-    #                     condition_dict, force_avg, force_std_avg
-    #                 )
-    #                 flap_config_repeats[key_force] = (force_coef, force_coef_std)
-    #             flap_exp[key][key_def] = flap_config_repeats
-    #         else:
-    #             # if its not a list
-    #             flap_exp[key][key_def] = {}
-    #             for key_force in ["drag", "lift", "moment"]:
-    #                 test = ExpPostProcess(flap_config_data[key][key_def], key)
-    #                 force, force_std = test.get_avg(key_force)
-    #                 force_coef, force_coef_std = force_coef_std_calc(
-    #                     condition_dict, force, force_std
-    #                 )
-    #                 flap_exp[key][key_def][key_force] = (force_coef, force_coef_std)
-
-    # %% reading ods for cfd data
-    os.chdir("data")
-    bicone_cfd = pd.read_excel("combined.ods", engine="odf", sheet_name="d_cone_cfd")
-    fin_cfd = pd.read_excel("combined.ods", engine="odf", sheet_name="fin_cfd")
-    flap_cfd = pd.read_excel("combined.ods", engine="odf", sheet_name="flap_cfd")
-    print(bicone_cfd)
-    # %% plotting with cfd and exp
-
-    # flatten bicone
-    record = []
-    for aoa, aoa_data in bicone_exp.items():
-        for force_typ, force_data in aoa_data.items():
-            record_dict = {
-                "aoa": aoa,
-                "force": force_typ,
-                "force_coef": 0
-                if (aoa == 0 and (force_typ == "lift" or force_typ == "moment"))
-                else force_data[0],
-                "force_coef_std": force_data[1],
-            }
-            record.append(record_dict)
-    bicone_exp_df = pd.DataFrame(record)
-    bicone_exp_df_data = pd.pivot_table(
-        bicone_exp_df, values="force_coef", index=["aoa"], columns=["force"]
-    ).reset_index()
-    bicone_exp_df_std = pd.pivot_table(
-        bicone_exp_df, values="force_coef_std", index=["aoa"], columns=["force"]
-    ).reset_index()
-
-    # plot fin and flap side by side
-    # flatted fin dictionary
-    record = []
-    record_flap = []
-    for aoa, aoa_data in fin_exp.items():
-        for defl, defl_data in aoa_data.items():
-            for force_typ, force_data in defl_data.items():
-                record_dict = {
-                    "aoa": aoa,
-                    "def": defl,
-                    "force": force_typ,
-                    "force_coef": 0
-                    if (
-                        aoa == 0
-                        and defl == 0
-                        and (force_typ == "lift" or force_typ == "moment")
-                    )
-                    else force_data[0],
-                    "force_coef_std": force_data[1],
-                }
-                record.append(record_dict)
-                if aoa in [0, 5] and defl == 0:
-                    record_flap.append(record_dict)
-
-    fin_exp_df = pd.DataFrame(record)
-    fin_exp_df_data = pd.pivot_table(
-        fin_exp_df, values="force_coef", index=["aoa", "def"], columns=["force"]
-    ).reset_index()
-    fin_exp_df_std = pd.pivot_table(
-        fin_exp_df, values="force_coef_std", index=["aoa", "def"], columns=["force"]
-    ).reset_index()
-
-    # flatted flap dictionary
-    for aoa, aoa_data in flap_exp.items():
-        for defl, defl_data in aoa_data.items():
-            for force_typ, force_data in defl_data.items():
-                record_dict = {
-                    "aoa": aoa,
-                    "def": defl,
-                    "force": force_typ,
-                    "force_coef": force_data[0],
-                    "force_coef_std": force_data[1],
-                }
-                record_flap.append(record_dict)
-    flap_exp_df = pd.DataFrame(record_flap)
-    flap_exp_df_data = pd.pivot_table(
-        flap_exp_df, values="force_coef", index=["aoa", "def"], columns=["force"]
-    ).reset_index()
-    flap_exp_df_std = pd.pivot_table(
-        flap_exp_df, values="force_coef_std", index=["aoa", "def"], columns=["force"]
-    ).reset_index()
-
-    temp = PostPlots(
-        [fin_cfd, flap_cfd],
-        [fin_exp_df_data, flap_exp_df_data],
-        [fin_exp_df_std, flap_exp_df_std],
-    )
-    temp.plot_aoa(0, "drag")
-    temp.plot_aoa(5, "drag")
-    temp.plot_aoa(0, "lift")
-    temp.plot_aoa(5, "lift")
-
-    bcone = PostPlots_bcone(bicone_cfd, bicone_exp_df_data, bicone_exp_df_std)
-    bcone.plot_aoa("drag")
-    bcone.plot_aoa("lift")
+    # ExpPostProcess.plot_freq_domain(welch_res_5)
