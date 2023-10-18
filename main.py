@@ -188,13 +188,13 @@ class ExpPostProcess:
     @staticmethod
     def plot_freq_domain(data):
         cmap = mpl.colormaps["viridis"]
-        fig, ax = plt.subplots(figsize=(12, 6))
+        fig, ax = plt.subplots(figsize=(10, 6))
         for i in data:
             if i["config"][0] in ["Background", "Tap 1", "Tap 2"]:
-                # color = "k"
                 lwidth = 1.5
-                ax.loglog(i["freq"], i["psd"], linewidth=lwidth, label=i["label"][0])
-                print("trigger")
+                (line,) = ax.loglog(
+                    i["freq"], i["psd"], linewidth=lwidth, label=i["label"][0]
+                )
             else:
                 lwidth = 1
                 ax.loglog(
@@ -204,13 +204,17 @@ class ExpPostProcess:
                     label=i["label"][0],
                     alpha=0.3,
                 )
-                # color = cmap(random.random())
-            ax.minorticks_on()
-            ax.grid(which="minor", linestyle=":", linewidth="0.5", color="gray")
-            ax.legend()
+        ax.yaxis.set_minor_locator(mpl.ticker.AutoMinorLocator())
+        ax.minorticks_on()
+        ax.grid(which="minor", linestyle=":", linewidth="0.5", color="gray")
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), ncols=len(data) / 4)
+        ax.set_ylim(0, 2e2)
         plt.xlabel("Frequency")
         plt.ylabel("PSD")
         plt.tight_layout()
+
+        # add legend outside the plot window below
+
         plt.show(block=True)
 
 
@@ -679,42 +683,27 @@ if __name__ == "__main__":
     for i in bicone_0:
         welch_res_0.append(i.find_welch(force_to_check))
 
-    # other aoa
-    # fin_5 = [
-    #     ExpPostProcess(file, 5) if not isinstance(file, list) else file
-    #     for sublist in fin_config_data[5].values()
-    #     for file in (sublist if isinstance(sublist, list) else [sublist])
-    # ]
-    # flap_5 = [
-    #     ExpPostProcess(file, 5) if not isinstance(file, list) else file
-    #     for sublist in flap_config_data[5].values()
-    #     for file in (sublist if isinstance(sublist, list) else [sublist])
-    # ]
-    # new_data = ExpPostProcess(
-    #     "TR024.csv",
-    #     5,
-    #     label="Fin AoA = 5, Higher Sampling rate",
-    #     cutoff_time_range=(0.027, 0.0455),
-    #     sampling_rate=4e4,
-    #     averaging_window=200,
-    # )
-    # higher_sampling_data = new_data.find_welch(force_to_check)
+    welch_res_5 = []
+    fin_5 = {
+        keys: [
+            ExpPostProcess(file, "Fin", 5, keys) for file in fin_config_data[5][keys]
+        ]
+        for keys in fin_config_data[5].keys()
+    }
+    flap = {
+        keys: [
+            ExpPostProcess(file, "Flap", 5, keys) for file in flap_config_data[5][keys]
+        ]
+        for keys in flap_config_data[5].keys()
+    }
+    welch_res_5.append(background_fft)
+    [welch_res_5.append(i) for i in tap_fft]
+    fin_5 = flatten(fin_5)
+    flap_5 = flatten(flap)
+    for i in fin_5:
+        welch_res_5.append(i.find_welch(force_to_check))
+    for i in flap_5:
+        welch_res_5.append(i.find_welch(force_to_check))
 
-    # compare_avg_plot(
-    # *[new_data, fin_5[1]],
-    #     force=[force_to_check, force_to_check],
-    #     title=["40khz", "10khz"],
-    # )
-
-    # welch_res_5 = []
-    # for i in fin_5:
-    #     welch_res_5.append(i.find_welch(force_to_check))
-    # for i in flap_5:
-    #     welch_res_5.append(i.find_welch(force_to_check))
-    # [welch_res_5.append(i) for i in tap_fft]
-    # welch_res_5.append(higher_sampling_data)
-    # welch_res_5.append(background_fft)
-    # welch_res_5.append(bicone_0[0].find_welch(force_to_check))
-    # welch_res_5.append(fin_0[0].find_welch(force_to_check))
     ExpPostProcess.plot_freq_domain(welch_res_0)
-    # ExpPostProcess.plot_freq_domain(welch_res_5)
+    ExpPostProcess.plot_freq_domain(welch_res_5)
