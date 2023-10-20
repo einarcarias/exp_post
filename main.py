@@ -13,6 +13,7 @@ import cmasher as cmr
 import random
 import re
 from typing import Dict, Union, List
+import sympy as sym
 
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -278,7 +279,7 @@ class PostPlots:
             marker = random.choice(marker_choice)
             # Data sort
             cfd = self.cfd_df.query(f"aoa == {str(aoa)}")
-            exp = self.exp_df.query(f"aoa == {str(aoa)} and force == '{force_target}'")
+            exp = self.exp_df.query(f"aoa == {str(aoa)}")
 
             axs.scatter(
                 cfd["deflection"],
@@ -289,15 +290,15 @@ class PostPlots:
             )
             axs.scatter(
                 exp["deflection"],
-                exp["avg"],
+                exp[force_target].apply(lambda x: x[0]),
                 marker=marker,
                 c="k",
                 label=f"alpha={aoa}(Exp)",
             )
             axs.errorbar(
                 exp["deflection"],
-                exp["avg"],
-                yerr=exp["std"],
+                exp[force_target].apply(lambda x: x[0]),
+                yerr=exp[force_target].apply(lambda x: x[1]),
                 fmt="none",
                 c="k",
                 capsize=5,
@@ -417,6 +418,9 @@ def process_data_to_dataframe(config_data, condition_dict, config_name):
 
     # List to store processed data
     data_list = []
+    diameter_model = condition_dict["diameter"][0]
+    diamter_sting = condition_dict["sting_diam"]
+    ca_base_0 = 0.018
 
     # Loop through each angle of attack (aoa)
     for aoa in config_data.keys():
@@ -460,8 +464,102 @@ def process_data_to_dataframe(config_data, condition_dict, config_name):
         data_list,
         columns=["aoa", "deflection", "force", "avg", "std"],
     )
+    # Pivot the DataFrame to have CL, CD, and CM columns
+    df_pivot = df.pivot_table(
+        index=["aoa", "deflection"], columns="force", values=["avg", "std"]
+    )
 
-    return df
+    # Flatten the column names
+    df_pivot.columns = ["_".join(col).strip() for col in df_pivot.columns.values]
+
+    # Reset the index
+    df_pivot = df_pivot.reset_index()
+
+    # Rename the columns
+    df_pivot = df_pivot.rename(
+        columns={
+            "avg_CL": "CL",
+            "std_CL": "CL_std",
+            "avg_CD": "CD",
+            "std_CD": "CD_std",
+            "avg_CM": "CM",
+            "std_CM": "CM_std",
+        }
+    )
+
+    # Reorder the columns
+    df_pivot = df_pivot[
+        ["aoa", "deflection", "CL", "CL_std", "CD", "CD_std", "CM", "CM_std"]
+    ]
+
+    # Apply base pressure correction to CL and CD columns
+    correction = df_pivot.apply(
+        lambda row: pd.Series(
+            [
+                base_pressure_correction(
+                    row["CD"],
+                    row["CL"],
+                    ca_base_0,
+                    row["aoa"],
+                    np.pi * diameter_model**2 / 4,
+                    np.pi * diamter_sting**2 / 4,
+                )
+            ]
+        ),
+        axis=1,
+    )
+    df_pivot["CL"] = correction[0].apply(lambda x: x[0])
+    df_pivot["CD"] = correction[0].apply(lambda x: x[1])
+
+    # Convert CL, CD, and CM columns to tuples of (avg, std)
+    df_pivot[["CL", "CD", "CM"]] = df_pivot[["CL", "CD", "CM"]].apply(
+        lambda col: list(zip(col, df_pivot[col.name + "_std"]))
+    )
+    df_pivot = df_pivot.drop(columns=["CL_std", "CD_std", "CM_std"])
+
+    return df_pivot
+
+
+def base_pressure_correction(
+    drag_force, lift_force, ca_base_0, alpha, base_area, sting_area
+):
+    """
+    Calculates the corrected lift and drag coefficients based on the base pressure
+    coefficient and the measured lift and drag forces.
+
+    Parameters
+    ----------
+    drag_force : float
+        The measured drag force coef.
+    lift_force : float
+        The measured lift force coef.
+    ca_base_0 : float
+        The base pressure coefficient at alpha=0.
+    alpha : float
+        The angle of attack in radians.
+    base_area : float
+        The area of the base in m^2.
+    sting_area : float
+        The area of the sting in m^2.
+
+    Returns
+    -------
+    cl_new : float
+        The corrected lift coefficient.
+    cd_new : float
+        The corrected drag coefficient.
+    """
+    ratio = sting_area / base_area
+    ca_base = ca_base_0 if alpha == 0 else ca_base_0 * (np.cos(alpha) ** 2)
+    ca_base = ca_base * ratio
+    ca, cn = sym.symbols("ca,cn")
+    eq1 = sym.Eq(cn * np.cos(alpha) - ca * np.sin(alpha), lift_force)
+    eq2 = sym.Eq(cn * np.sin(alpha) + ca * np.cos(alpha), drag_force)
+    result = sym.solve([eq1, eq2], (ca, cn))
+    cl_new = result[cn] * np.cos(alpha) - (result[ca] + ca_base) * np.sin(alpha)
+    cd_new = result[cn] * np.sin(alpha) + (result[ca] + ca_base) * np.cos(alpha)
+
+    return cl_new, cd_new
 
 
 def compare_avg_plot(*args, **kwargs):
@@ -574,6 +672,7 @@ if __name__ == "__main__":
         "rho": (rho, rho_std),
         "velocity": (velocity, velocity_std),
         "diameter": (diameter, diameter_std),
+        "sting_diam": 15.875e-3,
     }
 
     # %% testing aoa= 5, d = 10 for fin config
