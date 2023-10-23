@@ -83,7 +83,7 @@ class ExpPostProcess:
         dict_aoa0_time = (
             {1: (0.0230, 0.0405), 2: (0.0203, 0.0436), 3: (0.0257, 0.0375)}
             if self.test_number >= 24
-            else {1: (0.0430, 0.062), 2: (0.0460, 0.0645), 3: (0.0460, 0.0645)}
+            else {1: (0.0460, 0.0645), 2: (0.0460, 0.0645), 3: (0.0460, 0.0645)}
         )
         dict_aoa5_time = (
             {1: (0.0268, 0.0449), 2: (0.0209, 0.0453), 3: (0.0254, 0.0451)}
@@ -714,7 +714,7 @@ if __name__ == "__main__":
     flap_5_40k = ExpPostProcess(fin_config_data[5][10][-1], "fin", 5, 10).plot_avg(
         "drag"
     )
-    fin_0=ExpPostProcess(fin_config_data[0][10][0], "fin", 0, 10)
+    fin_0 = ExpPostProcess(fin_config_data[0][10][0], "fin", 0, 10)
     fin_0.plot_avg("lift")
     fin_0.plot_avg("drag")
     fin_0.plot_avg("moment")
