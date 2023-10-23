@@ -15,7 +15,16 @@ import re
 from typing import Dict, Union, List
 import sympy as sym
 
+import scienceplots
 
+plt.style.use(["science", "bright"])
+plt.rcParams.update(
+    {
+        "font.family": "serif",  # specify font family here
+        "font.serif": ["Times"],  # specify font here
+        "font.size": 11,
+    }
+)
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
 
@@ -111,7 +120,7 @@ class ExpPostProcess:
         plt.grid(which="both")
         plt.show()
 
-    def plot_avg(self, force):
+    def plot_avg(self, force, use_cutoff=False):
         dict = {"moment": 3, "lift": 1, "drag": 2}
         column = dict[force]
         self.get_avg(force)
@@ -128,18 +137,23 @@ class ExpPostProcess:
         plt.plot(
             self.df.iloc[:, 0],
             self.df[f"smooth {dict[force]}"],
-            label="Moving Average",
+            label=f"Moving Average",
             color="red",
         )
         plt.axvline(x=min_time, color="black", linestyle="--")
         plt.axvline(x=max_time, color="black", linestyle="--")
-        plt.xlabel("Time(s)")
+        plt.xlabel(bold_text("Time(s)"))
         plt.ylabel(
-            f"{force.capitalize()} Force ({'N' if force in ['lift','drag'] else 'Nm'})"
+            bold_text(
+                f"{force.capitalize()} Force ({'N' if force in ['lift','drag'] else 'Nm'})"
+            )
         )
-        plt.title(f"Centered Moving Average Smoothing for {self.name()}")
+        # plt.title(f"Centered Moving Average Smoothing for {self.name()}")
 
-        plt.legend()
+        plt.legend(loc="lower right")
+        min_lim = min_time if use_cutoff else 0
+        max_lim = max_time if use_cutoff else 0.2
+        plt.xlim(min_lim, max_lim)
         plt.tight_layout()
         plt.show()
 
@@ -189,12 +203,20 @@ class ExpPostProcess:
     @staticmethod
     def plot_freq_domain(data):
         cmap = mpl.colormaps["viridis"]
-        fig, ax = plt.subplots(figsize=(10, 6))
+        fig, ax = plt.subplots(figsize=(10, 4))
         for i in data:
             if i["config"][0] in ["Background", "Tap 1", "Tap 2"]:
                 lwidth = 1.5
                 (line,) = ax.loglog(
-                    i["freq"], i["psd"], linewidth=lwidth, label=i["label"][0]
+                    i["freq"],
+                    i["psd"],
+                    linewidth=lwidth,
+                    label=i["label"][0],
+                    c="k"
+                    if i["config"][0] == "Background"
+                    else "g"
+                    if i["config"][0] == "Tap 1"
+                    else "orange",
                 )
             else:
                 lwidth = 1
@@ -203,15 +225,15 @@ class ExpPostProcess:
                     i["psd"],
                     linewidth=lwidth,
                     label=i["label"][0],
-                    alpha=0.3,
+                    alpha=0.4,
                 )
         ax.yaxis.set_minor_locator(mpl.ticker.AutoMinorLocator())
         ax.minorticks_on()
         ax.grid(which="minor", linestyle=":", linewidth="0.5", color="gray")
-        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), ncols=len(data) / 4)
+        # ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), ncols=len(data) / 4)
         ax.set_ylim(0, 2e2)
-        plt.xlabel("Frequency")
-        plt.ylabel("PSD")
+        plt.xlabel(bold_text("Frequency, Hz"))
+        plt.ylabel(bold_text("PSD, N$\mathrm{^2}$/Hz"))
         plt.tight_layout()
 
         # add legend outside the plot window below
@@ -602,7 +624,7 @@ def compare_avg_plot(*args, **kwargs):
             color="red",
             label="Moving Average",
         )
-        ax.set_title(f"{title[i]}")
+        # ax.set_title(f"{title[i]}")
         ax.axvline(x=min_time, color="black", linestyle="--")
         ax.axvline(x=max_time, color="black", linestyle="--")
         ax.set_xlabel(x_label)
@@ -615,6 +637,10 @@ def compare_avg_plot(*args, **kwargs):
         ax.grid(which="minor", linestyle=":", linewidth="0.5", color="gray")
     plt.tight_layout()
     plt.show(block=False)
+
+
+def bold_text(text):
+    return r"\textbf{" + text + "}"
 
 
 if __name__ == "__main__":
@@ -632,7 +658,7 @@ if __name__ == "__main__":
             0: ["TR009.csv", "TR030.csv"],
             5: ["TR035.csv"],
             10: ["TR012.csv", "TR026.csv", "TR027.csv"],
-        },  # from 26 onwards its 40khz need to revised the cut off time
+        },  # from 24 onwards its 40khz need to revised the cut off time
         5: {
             0: ["TR010.csv", "TR029.csv"],
             5: ["TR036.csv"],
@@ -676,15 +702,22 @@ if __name__ == "__main__":
     }
 
     # %% testing aoa= 5, d = 10 for fin config
-    fin_0_5 = ExpPostProcess(
-        fin_config_data[0][5][0],
-        "fin",
-        0,
-        5,
-    ).plot_avg("drag")
-    flap_0_10 = ExpPostProcess(flap_config_data[0][10][0], "flap", 0, 10).plot_avg(
+    # fin_5 = ExpPostProcess(
+    #     fin_config_data[5][10][0],
+    #     "fin",
+    #     5,
+    #     10,
+    # )
+    # fin_5.plot_avg("lift")
+    # fin_5.plot_avg("drag")
+    # fin_5.plot_avg("moment")
+    flap_5_40k = ExpPostProcess(fin_config_data[5][10][-1], "fin", 5, 10).plot_avg(
         "drag"
     )
+    fin_0=ExpPostProcess(fin_config_data[0][10][0], "fin", 0, 10)
+    fin_0.plot_avg("lift")
+    fin_0.plot_avg("drag")
+    fin_0.plot_avg("moment")
     # %% post processing coefficients
     fin_post_df = process_data_to_dataframe(fin_config_data, condition_dict, "Fin")
     flap_post_df = process_data_to_dataframe(flap_config_data, condition_dict, "Flap")
