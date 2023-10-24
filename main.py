@@ -8,6 +8,7 @@ from scipy.fft import fft, fftfreq, ifft
 from scipy.signal import welch
 from scipy.signal import butter, filtfilt
 from scipy import signal
+from scipy.interpolate import interp1d as interp
 import numpy as np
 import cmasher as cmr
 import random
@@ -643,6 +644,56 @@ def bold_text(text):
     return r"\textbf{" + text + "}"
 
 
+class BasePressureCalc:
+    def __init__(self, mach):
+        if isinstance(mach, float):
+            self.mach_list = [mach]
+        elif isinstance(mach, np.ndarray):
+            self.mach_list = mach
+        else:
+            raise TypeError("Mach number must be a float or a list of floats")
+        self.gamma = 1.4
+
+    def honeywell(self):
+        for mach in self.mach_list:
+            if not (0 <= mach < 1.1 or 1.1 <= mach < 5 or mach >= 5):
+                raise ValueError("Mach number out of range")
+
+        return [
+            -(0.115 + (10 * mach - 3) ** 3 * 10 ** (-4))
+            if 0 < mach < 1
+            else -(0.255 - 0.135 * np.log(mach))
+            if 1.1 <= mach < 5
+            else -(0.019 - 0.012 * (mach - 5) + (0.1 / mach))
+            if mach > 5
+            else None
+            for mach in self.mach_list
+        ]
+
+    def gabeaud(self):
+        def gab(m):
+            term1 = -2 / (self.gamma * m**2)
+            term2 = (2 / (self.gamma + 1)) ** self.gamma
+            term3 = (1 / m) ** (2 * self.gamma)
+            term4 = (2 * self.gamma * m**2 - (self.gamma - 1)) / (self.gamma + 1)
+            return term1 * (term2 * term3 * term4 - 1)
+
+        return [-gab(mach) for mach in self.mach_list]
+
+    def love(self):
+        os.chdir("data")
+        love_df = pd.read_csv("love_exp.csv", header=None, names=["x", "y"])
+        os.chdir("..")
+        x_data = love_df["x"]
+        y_data = love_df["y"]
+        coeffs = np.polyfit(x_data, y_data, 3)
+        poly = np.poly1d(coeffs)
+        interp_func = interp(
+            x_data, poly(x_data), kind="cubic", fill_value="extrapolate"
+        )
+        return interp_func(self.mach_list)
+
+
 if __name__ == "__main__":
     # data file dictionary
     # modify accordingly
@@ -700,7 +751,28 @@ if __name__ == "__main__":
         "diameter": (diameter, diameter_std),
         "sting_diam": 15.875e-3,
     }
+    # %% testing base pressure correction class
+    mach = np.linspace(1, 8.4, 1000)
+    base_pressure = BasePressureCalc(mach)
+    honeywell = base_pressure.honeywell()
+    gabeaud = base_pressure.gabeaud()
+    love = base_pressure.love()
+    fig, ax = plt.subplots(figsize=(5, 4))
+    linew = 1.5
+    
+    ax.plot(mach, honeywell, label="Honeywell",linewidth=linew,c="k",linestyle=":")
+    ax.plot(mach, gabeaud, label="Gabeaud", linewidth=linew,c="k",linestyle="--")
+    ax.plot(mach, love, label="Love (Curve fit)",linewidth=linew,c="k",linestyle="-")
+    ax.set_xlabel(bold_text(r"Freestream Mach Number, M\boldmath$_\infty$"))
+    ax.set_ylabel(bold_text(r"Base Pressure Coefficient, C\boldmath$_{P_B}$"))
+    # reverse the y axis
+    ax.invert_yaxis()
+    ax.legend()
+    ax.set_xlim(1, 8.4)
 
+    plt.tight_layout()
+
+    plt.show(block=True)
     # %% testing aoa= 5, d = 10 for fin config
     # fin_5 = ExpPostProcess(
     #     fin_config_data[5][10][0],
