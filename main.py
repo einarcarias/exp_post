@@ -578,8 +578,8 @@ def base_pressure_correction(
     eq1 = sym.Eq(cn * np.cos(alpha) - ca * np.sin(alpha), lift_force)
     eq2 = sym.Eq(cn * np.sin(alpha) + ca * np.cos(alpha), drag_force)
     result = sym.solve([eq1, eq2], (ca, cn))
-    cl_new = result[cn] * np.cos(alpha) - (result[ca] + ca_base) * np.sin(alpha)
-    cd_new = result[cn] * np.sin(alpha) + (result[ca] + ca_base) * np.cos(alpha)
+    cl_new = result[cn] * np.cos(alpha) - (result[ca] - ca_base) * np.sin(alpha)
+    cd_new = result[cn] * np.sin(alpha) + (result[ca] - ca_base) * np.cos(alpha)
 
     return cl_new, cd_new
 
