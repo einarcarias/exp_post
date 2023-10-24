@@ -773,6 +773,7 @@ if __name__ == "__main__":
     plt.tight_layout()
 
     plt.show(block=True)
+    plt.savefig("base_pressure.png", dpi=300)
     # %% testing aoa= 5, d = 10 for fin config
     # fin_5 = ExpPostProcess(
     #     fin_config_data[5][10][0],
