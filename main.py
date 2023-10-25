@@ -15,7 +15,7 @@ import random
 import re
 from typing import Dict, Union, List
 import sympy as sym
-
+from sklearn.metrics import mean_absolute_error as mae
 import scienceplots
 
 plt.style.use(["science", "bright"])
@@ -46,7 +46,7 @@ class ExpPostProcess:
         self.aoa = aoa
         self.deflection = deflection
         self.filename = filename
-        self.df = pd.read_csv(filename, delimiter="\t")
+        self.df = pd.read_csv(filename, delimiter="\t", dtype=np.float64)
         self.test_type()
         self.sampling_rate = self.get_sampling_rate()
         self.averaging_window = 80 if self.sampling_rate < 10006 else 200
@@ -292,6 +292,7 @@ class PostPlots:
             None
         """
         force_target: str = self.dict_search(force)
+        
         exp_df_no_tuple = self.exp_df.copy()
         for force_i in ["CL", "CD", "CM"]:
             exp_df_no_tuple[force_i] = exp_df_no_tuple[force_i].apply(lambda x: x[0])
@@ -300,14 +301,8 @@ class PostPlots:
 
         # Ensure aoa_values is a list
 
-        max_val = (
-            concat_df.query(f"aoa == 5")[f"{force_target}"].astype(float).max()
-            + exp_max_std
-        )
-        min_val = (
-            concat_df.query(f"aoa == 5")[f"{force_target}"].astype(float).min()
-            - exp_max_std
-        )
+        max_val ={"CL": 0.38, "CD": 0.25, "CM": 0.1}[force_target]      
+        
         fig, axs = plt.subplots(figsize=(5, 4))
 
         # Data sort
@@ -347,10 +342,11 @@ class PostPlots:
 
         axs.set_xlabel(bold_text("Deflection Angle (deg)"))
         axs.set_ylabel(bold_text(f"{force.capitalize()} Coefficient"))
-        plt.ylim([min_val, max_val])
+        plt.ylim([0.0, max_val])
         plt.xlim([-0.1, cfd["deflection"].max() + 0.5])
-        axs.legend()
+        axs.legend(loc="best")
         fig.tight_layout()
+        plt.savefig(f"{force}_aoa{aoa_values}_comparison.png", dpi=300)
         plt.show(block=True)
 
 
@@ -419,7 +415,7 @@ class ErrorAnalysis:
         term3 = 4 * ((self.velocity_std / self.velocity) ** 2)
         term4 = 4 * ((self.diameter_std / self.diameter) ** 2)
         coef_std = np.sqrt(term1 + term2 + term3 + term4) * force_coef
-        return force_coef, coef_std
+        return force_coef.astype(np.float64), coef_std.astype(np.float64)
 
     @staticmethod
     def repeat_avg(ErrorAnalysisList, force):
@@ -594,8 +590,8 @@ def base_pressure_correction(
     ca_base = ca_base_0[0] if alpha == 0 else ca_base_0[0] * (np.cos(alpha) ** 2)
     ca_base = ca_base * ratio
     ca, cn = sym.symbols("ca,cn")
-    eq1 = sym.Eq(cn * np.cos(alpha) - ca * np.sin(alpha), lift_force)
-    eq2 = sym.Eq(cn * np.sin(alpha) + ca * np.cos(alpha), drag_force)
+    eq1 = sym.Eq(cn * sym.cos(alpha) - ca * sym.sin(alpha), lift_force)
+    eq2 = sym.Eq(cn * sym.sin(alpha) + ca * sym.cos(alpha), drag_force)
     result = sym.solve([eq1, eq2], (ca, cn))
     cl_new = result[cn] * np.cos(alpha) - (result[ca] + ca_base) * np.sin(alpha)
     cd_new = result[cn] * np.sin(alpha) + (result[ca] + ca_base) * np.cos(alpha)
@@ -660,6 +656,46 @@ def compare_avg_plot(*args, **kwargs):
 
 def bold_text(text):
     return r"\textbf{" + text + "}"
+
+
+def percent_error(est, true):
+    return np.abs(est - true) / (true+1e-10) * 100
+
+
+def weighted_mape(y_true, y_pred, std_values):
+    """
+    Calculate the weighted mean absolute percentage error (wMAPE) between the true and predicted values.
+
+    Args:
+        y_true (array-like): The true values.
+        y_pred (array-like): The predicted values.
+        std_values (array-like): The standard deviation values.
+
+    Returns:
+        float: The wMAPE.
+    """
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    std_values = np.array(std_values)
+    weights = 1 / (std_values + 1e-10)  # Adding a small value to avoid division by zero
+    absolute_percentage_errors = np.abs((y_true - y_pred) / (y_true + 1e-10)) * 100
+    return np.sum(absolute_percentage_errors * weights) / np.sum(weights)
+
+
+def weighted_mae(y_true, y_pred, std_values):
+    """
+    Calculate weighted mean absolute error (MAE) based on standard deviations.
+
+    :param y_true: list of true values
+    :param y_pred: list of predicted values
+    :param std_values: list of standard deviations for the true values
+    :return: Weighted MAE
+    """
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    weights = 1 / (std_values + 1e-10)  # Adding a small value to avoid division by zero
+    absolute_errors = np.abs(y_true - y_pred)
+    return np.sum(absolute_errors * weights) / np.sum(weights)
 
 
 class BasePressureCalc:
@@ -860,15 +896,13 @@ if __name__ == "__main__":
                 3: -10,
                 4: -7.5,
                 5: -5,
-                6: -2.5,
-                7: 0,
-                8: 2.5,
-                9: 5,
-                10: 7.5,
-                11: 10,
-                12: 12.5,
-                13: 15,
-                14: 17.5,
+                6: 0,
+                7: 5,
+                8: 7.5,
+                9: 10,
+                10: 12.5,
+                11: 15,
+                12: 17.5,
             }
         )
         .reset_index()
@@ -900,7 +934,7 @@ if __name__ == "__main__":
 
     # now for flaps
     cfd_flap = [
-        pd.read_excel(f"mach8_SST_{force}_adapt.xlsx", sheet_name="flap", index_col=0)
+        pd.read_excel(f"mach8_SST_{force}.xlsx", sheet_name="flap", index_col=0)
         .reset_index()
         .melt(id_vars=["index"], var_name="deflection", value_name=force)
         for force in ["CL", "CD", "CM"]
@@ -916,12 +950,28 @@ if __name__ == "__main__":
     fin_plot = PostPlots(cfd_fin, fin_post_df, inviscid_fin)
     flap_plot = PostPlots(cfd_flap, flap_post_df, inviscid_flap)
     for aoa in [0, 5]:
-        fin_plot.plot_aoa(aoa, "lift")
-        fin_plot.plot_aoa(aoa, "drag")
-        fin_plot.plot_aoa(aoa, "moment")
+        # fin_plot.plot_aoa(aoa, "lift")
+        # fin_plot.plot_aoa(aoa, "drag")
         # flap
-        # flap_plot.plot_aoa(aoa, "lift")
-        # flap_plot.plot_aoa(aoa, "drag")
+        flap_plot.plot_aoa(aoa, "lift")
+        flap_plot.plot_aoa(aoa, "drag")
+    # %% error compared with experiment
+    combined = fin_post_df.merge(inviscid_fin, on=["aoa", "deflection"])
+    exp_fin_df_copy = fin_post_df.copy()
+    fin_error = []
+
+    for i in ["CL", "CD", "CM"]:
+        cfd_val = cfd_fin.query(f"aoa == [0] and deflection == [0,5,10]")[i]
+        invis_val = inviscid_fin.query(f"aoa == [0] and deflection == [0,5,10]")[i]
+        exp_val = exp_fin_df_copy.query(f"aoa == [0] and deflection == [0,5,10]")[
+            i
+        ].apply(lambda x: x[0])
+        exp_std = exp_fin_df_copy.query(f"aoa == [0] and deflection == [0,5,10]")[
+            i
+        ].apply(lambda x: x[1])
+        cfd_error = weighted_mae(exp_val, cfd_val, exp_std)
+        invis_error = weighted_mae(exp_val, invis_val, exp_std)
+        fin_error.append([cfd_error, invis_error])
 
     # %% frequency domain
     force_to_check = "lift"
