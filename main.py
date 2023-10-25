@@ -255,9 +255,12 @@ class PostPlots:
         exp_df (pd.DataFrame): A DataFrame containing experimental data.
     """
 
-    def __init__(self, cfd_df: pd.DataFrame, exp_df: pd.DataFrame):
+    def __init__(
+        self, cfd_df: pd.DataFrame, exp_df: pd.DataFrame, invis_df: pd.DataFrame
+    ):
         self.cfd_df = cfd_df
         self.exp_df = exp_df
+        self.invis_df = invis_df
 
     def dict_search(self, force: str) -> str:
         """
@@ -276,7 +279,7 @@ class PostPlots:
         }
         return force_dict[force]
 
-    def plot_aoa(self, aoa_values: Union[float, List[float]], force: str) -> None:
+    def plot_aoa(self, aoa_values: float, force: str) -> None:
         """
         Plot scatter plots with error bars for angle of attack (aoa) value(s)
         and a specified force type.
@@ -289,49 +292,64 @@ class PostPlots:
             None
         """
         force_target: str = self.dict_search(force)
+        exp_df_no_tuple = self.exp_df.copy()
+        for force_i in ["CL", "CD", "CM"]:
+            exp_df_no_tuple[force_i] = exp_df_no_tuple[force_i].apply(lambda x: x[0])
+        concat_df = pd.concat([self.cfd_df, self.invis_df, exp_df_no_tuple])
+        exp_max_std = self.exp_df[force_target].apply(lambda x: x[1]).max()
 
         # Ensure aoa_values is a list
-        if isinstance(aoa_values, (int, float)):
-            aoa_values = [aoa_values]
-        max_val = self.cfd_df[f"{force_target}"].max() + 0.05
-        min_val = self.cfd_df[f"{force_target}"].min() - 0.05
-        fig, axs = plt.subplots(figsize=(12, 6))
 
-        for aoa in aoa_values:
-            marker_choice = ["o", "s", "^", "v", "D", "P", "X", "d"]
-            marker = random.choice(marker_choice)
-            # Data sort
-            cfd = self.cfd_df.query(f"aoa == {str(aoa)}")
-            exp = self.exp_df.query(f"aoa == {str(aoa)}")
+        max_val = (
+            concat_df.query(f"aoa == 5")[f"{force_target}"].astype(float).max()
+            + exp_max_std
+        )
+        min_val = (
+            concat_df.query(f"aoa == 5")[f"{force_target}"].astype(float).min()
+            - exp_max_std
+        )
+        fig, axs = plt.subplots(figsize=(5, 4))
 
-            axs.scatter(
-                cfd["deflection"],
-                cfd[force_target],
-                marker=marker,
-                c="r",
-                label=f"alpha={aoa}(CFD)",
-            )
-            axs.scatter(
-                exp["deflection"],
-                exp[force_target].apply(lambda x: x[0]),
-                marker=marker,
-                c="k",
-                label=f"alpha={aoa}(Exp)",
-            )
-            axs.errorbar(
-                exp["deflection"],
-                exp[force_target].apply(lambda x: x[0]),
-                yerr=exp[force_target].apply(lambda x: x[1]),
-                fmt="none",
-                c="k",
-                capsize=5,
-            )
+        # Data sort
+        cfd = self.cfd_df.query(f"aoa == {str(aoa_values)}")
+        exp = self.exp_df.query(f"aoa == {str(aoa_values)}")
+        invis = self.invis_df.query(f"aoa == {str(aoa_values)}")
 
-        axs.set_xlabel("Deflection Angle (deg)")
-        axs.set_ylabel(f"{force.capitalize()} Coefficient")
-        axs.set_ylim(min_val, max_val)
+        axs.scatter(
+            cfd["deflection"],
+            cfd[force_target],
+            marker="^",
+            edgecolors="k",
+            label=rf"CFD",
+        )
+        axs.scatter(
+            invis["deflection"],
+            invis[force_target],
+            marker="o",
+            edgecolors="k",
+            label=f"Inviscid Code",
+        )
+        axs.scatter(
+            exp["deflection"],
+            exp[force_target].apply(lambda x: x[0]),
+            marker="s",
+            c="k",
+            label="Experiment",
+        )
+        axs.errorbar(
+            exp["deflection"],
+            exp[force_target].apply(lambda x: x[0]),
+            yerr=exp[force_target].apply(lambda x: x[1]),
+            fmt="none",
+            c="k",
+            capsize=5,
+        )
+
+        axs.set_xlabel(bold_text("Deflection Angle (deg)"))
+        axs.set_ylabel(bold_text(f"{force.capitalize()} Coefficient"))
+        plt.ylim([min_val, max_val])
+        plt.xlim([-0.1, cfd["deflection"].max() + 0.5])
         axs.legend()
-        axs.grid(which="both")
         fig.tight_layout()
         plt.show(block=True)
 
@@ -443,7 +461,7 @@ def process_data_to_dataframe(config_data, condition_dict, config_name):
     data_list = []
     diameter_model = condition_dict["diameter"][0]
     diamter_sting = condition_dict["sting_diam"]
-    ca_base_0 = 0.018
+    ca_base_0 = BasePressureCalc(condition_dict["mach"]).gabeaud()
 
     # Loop through each angle of attack (aoa)
     for aoa in config_data.keys():
@@ -573,14 +591,14 @@ def base_pressure_correction(
         The corrected drag coefficient.
     """
     ratio = sting_area / base_area
-    ca_base = ca_base_0 if alpha == 0 else ca_base_0 * (np.cos(alpha) ** 2)
+    ca_base = ca_base_0[0] if alpha == 0 else ca_base_0[0] * (np.cos(alpha) ** 2)
     ca_base = ca_base * ratio
     ca, cn = sym.symbols("ca,cn")
     eq1 = sym.Eq(cn * np.cos(alpha) - ca * np.sin(alpha), lift_force)
     eq2 = sym.Eq(cn * np.sin(alpha) + ca * np.cos(alpha), drag_force)
     result = sym.solve([eq1, eq2], (ca, cn))
-    cl_new = result[cn] * np.cos(alpha) - (result[ca] - ca_base) * np.sin(alpha)
-    cd_new = result[cn] * np.sin(alpha) + (result[ca] - ca_base) * np.cos(alpha)
+    cl_new = result[cn] * np.cos(alpha) - (result[ca] + ca_base) * np.sin(alpha)
+    cd_new = result[cn] * np.sin(alpha) + (result[ca] + ca_base) * np.cos(alpha)
 
     return cl_new, cd_new
 
@@ -750,6 +768,7 @@ if __name__ == "__main__":
         "velocity": (velocity, velocity_std),
         "diameter": (diameter, diameter_std),
         "sting_diam": 15.875e-3,
+        "mach": 8.2,
     }
     # %% testing base pressure correction class
     mach = np.linspace(1, 8.4, 1000)
@@ -759,10 +778,10 @@ if __name__ == "__main__":
     love = base_pressure.love()
     fig, ax = plt.subplots(figsize=(5, 4))
     linew = 1.5
-    
-    ax.plot(mach, honeywell, label="Honeywell",linewidth=linew,c="k",linestyle=":")
-    ax.plot(mach, gabeaud, label="Gabeaud", linewidth=linew,c="k",linestyle="--")
-    ax.plot(mach, love, label="Love (Curve fit)",linewidth=linew,c="k",linestyle="-")
+
+    ax.plot(mach, honeywell, label="Honeywell", linewidth=linew, c="k", linestyle=":")
+    ax.plot(mach, gabeaud, label="Gabeaud", linewidth=linew, c="k", linestyle="--")
+    ax.plot(mach, love, label="Love (Curve fit)", linewidth=linew, c="k", linestyle="-")
     ax.set_xlabel(bold_text(r"Freestream Mach Number, M\boldmath$_\infty$"))
     ax.set_ylabel(bold_text(r"Base Pressure Coefficient, C\boldmath$_{P_B}$"))
     # reverse the y axis
@@ -772,8 +791,8 @@ if __name__ == "__main__":
 
     plt.tight_layout()
 
-    plt.show(block=True)
     plt.savefig("base_pressure.png", dpi=300)
+    plt.show(block=True)
     # %% testing aoa= 5, d = 10 for fin config
     # fin_5 = ExpPostProcess(
     #     fin_config_data[5][10][0],
@@ -799,7 +818,70 @@ if __name__ == "__main__":
     flap_post_df = pd.concat(
         [flap_post_df, fin_post_df.query("deflection == 0")], ignore_index=True
     )
+    # %% sort out data for inviscid code
+    os.chdir("data")
+    inviscid_fin = [
+        pd.read_csv(f"{force.lower()}_invis_fin.csv", header=None)
+        .set_index(pd.Index([0, 5, 10, 15, 20]))
+        .rename(
+            columns={
+                0: -12.5,
+                1: -10,
+                2: -7.5,
+                3: -5,
+                4: -2.5,
+                5: 0,
+                6: 2.5,
+                7: 5,
+                8: 7.5,
+                9: 10,
+                10: 12.5,
+            }
+        )
+        .reset_index()
+        .melt(id_vars=["index"], var_name="deflection", value_name=force)
+        for force in ["CL", "CD", "CM"]
+    ]
+    inviscid_fin = (
+        inviscid_fin[0]
+        .merge(inviscid_fin[1], on=["index", "deflection"])
+        .merge(inviscid_fin[2], on=["index", "deflection"])
+    )
+    inviscid_fin.rename(columns={"index": "aoa"}, inplace=True)
 
+    inviscid_flap = [
+        pd.read_csv(f"{force.lower()}_invis_flap.csv", header=None)
+        .set_index(pd.Index([0, 5, 10, 15, 20]))
+        .rename(
+            columns={
+                0: -17.5,
+                1: -15,
+                2: -12.5,
+                3: -10,
+                4: -7.5,
+                5: -5,
+                6: -2.5,
+                7: 0,
+                8: 2.5,
+                9: 5,
+                10: 7.5,
+                11: 10,
+                12: 12.5,
+                13: 15,
+                14: 17.5,
+            }
+        )
+        .reset_index()
+        .melt(id_vars=["index"], var_name="deflection", value_name=force)
+        for force in ["CL", "CD", "CM"]
+    ]
+    inviscid_flap = (
+        inviscid_flap[0]
+        .merge(inviscid_flap[1], on=["index", "deflection"])
+        .merge(inviscid_flap[2], on=["index", "deflection"])
+    )
+    inviscid_flap.rename(columns={"index": "aoa"}, inplace=True)
+    os.chdir("..")
     # %% sort out cfd data
     os.chdir("data")
     cfd_fin = [
@@ -831,13 +913,15 @@ if __name__ == "__main__":
     os.chdir("..")
     # %% testing out plotting results
     # fin
-    fin_plot = PostPlots(cfd_fin, fin_post_df)
-    fin_plot.plot_aoa([0, 5], "lift")
-    fin_plot.plot_aoa([0, 5], "drag")
-    # flap
-    flap_plot = PostPlots(cfd_flap, flap_post_df)
-    flap_plot.plot_aoa([0, 5], "lift")
-    flap_plot.plot_aoa([0, 5], "drag")
+    fin_plot = PostPlots(cfd_fin, fin_post_df, inviscid_fin)
+    flap_plot = PostPlots(cfd_flap, flap_post_df, inviscid_flap)
+    for aoa in [0, 5]:
+        fin_plot.plot_aoa(aoa, "lift")
+        fin_plot.plot_aoa(aoa, "drag")
+        fin_plot.plot_aoa(aoa, "moment")
+        # flap
+        # flap_plot.plot_aoa(aoa, "lift")
+        # flap_plot.plot_aoa(aoa, "drag")
 
     # %% frequency domain
     force_to_check = "lift"
