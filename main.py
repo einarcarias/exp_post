@@ -15,7 +15,6 @@ import random
 import re
 from typing import Dict, Union, List
 import sympy as sym
-from sklearn.metrics import mean_absolute_error as mae
 import scienceplots
 
 plt.style.use(["science", "bright"])
@@ -303,7 +302,7 @@ class PostPlots:
 
         # Ensure aoa_values is a list
 
-        max_val = {"CL": 0.38, "CD": 0.25, "CM": 0.1}[force_target]
+        max_val = {"CL": 0.38, "CD": 0.25, "CM": 0.2}[force_target]
 
         fig, axs = plt.subplots(figsize=(5, 4))
 
@@ -411,11 +410,20 @@ class ErrorAnalysis:
         force_avg, force_std = self.ExpPostProcess_object.get_avg(force)
         force_coef = force_avg / (
             0.5 * self.rho * self.velocity**2 * ((np.pi * self.diameter**2 / 4))
+            if force in ["lift", "drag"]
+            else 0.5
+            * self.rho
+            * self.velocity**2
+            * ((np.pi * self.diameter**2 / 4) * self.diameter)
         )
         term1 = (force_std / force_avg) ** 2
         term2 = (self.rho_std / self.rho) ** 2
         term3 = 4 * ((self.velocity_std / self.velocity) ** 2)
-        term4 = 4 * ((self.diameter_std / self.diameter) ** 2)
+        term4 = (
+            4 * ((self.diameter_std / self.diameter) ** 2)
+            if force in ["lift", "drag"]
+            else 5 * ((self.diameter_std / self.diameter) ** 2)
+        )
         coef_std = np.sqrt(term1 + term2 + term3 + term4) * force_coef
         return force_coef.astype(np.float64), coef_std.astype(np.float64)
 
@@ -841,17 +849,8 @@ if __name__ == "__main__":
     # fin_5.plot_avg("lift")
     # fin_5.plot_avg("drag")
     # fin_5.plot_avg("moment")
-    fin_5_40k = ExpPostProcess(fin_config_data[5][10][-1], "fin", 5, 10).plot_avg(
-        "drag", y_lim=[-150, 150]
-    )
-
-    fin_5_10k = ExpPostProcess(fin_config_data[5][10][0], "fin", 5, 10).plot_avg(
-        "drag", y_lim=[-150, 150]
-    )
-    # fin_0 = ExpPostProcess(fin_config_data[0][10][0], "fin", 0, 10)
-    # fin_0.plot_avg("lift")
-    # fin_0.plot_avg("drag")
-    # fin_0.plot_avg("moment")
+    fin_0 = ExpPostProcess(flap_config_data[5][17.5][3], "flap", 5, 17.5)
+    fin_0.plot_avg("moment")
     # %% post processing coefficients
     fin_post_df = process_data_to_dataframe(fin_config_data, condition_dict, "Fin")
     flap_post_df = process_data_to_dataframe(flap_config_data, condition_dict, "Flap")
@@ -925,7 +924,7 @@ if __name__ == "__main__":
     # %% sort out cfd data
     os.chdir("data")
     cfd_fin = [
-        pd.read_excel(f"mach8_SST_{force}_adapt.xlsx", sheet_name="fin", index_col=0)
+        pd.read_excel(f"mach8_SST_{force}.xlsx", sheet_name="fin", index_col=0)
         .reset_index()
         .melt(id_vars=["index"], var_name="deflection", value_name=force)
         for force in ["CL", "CD", "CM"]
@@ -958,9 +957,11 @@ if __name__ == "__main__":
     for aoa in [0, 5]:
         # fin_plot.plot_aoa(aoa, "lift")
         # fin_plot.plot_aoa(aoa, "drag")
+        # fin_plot.plot_aoa(aoa, "moment")
         # flap
         flap_plot.plot_aoa(aoa, "lift")
         flap_plot.plot_aoa(aoa, "drag")
+        flap_plot.plot_aoa(aoa, "moment")
     # %% error compared with experiment
     combined = fin_post_df.merge(inviscid_fin, on=["aoa", "deflection"])
     exp_fin_df_copy = fin_post_df.copy()
