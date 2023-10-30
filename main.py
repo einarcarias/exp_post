@@ -121,7 +121,7 @@ class ExpPostProcess:
         plt.grid(which="both")
         plt.show()
 
-    def plot_avg(self, force, use_cutoff=False):
+    def plot_avg(self, force, use_cutoff=False, y_lim=None):
         dict = {"moment": 3, "lift": 1, "drag": 2}
         column = dict[force]
         self.get_avg(force)
@@ -155,6 +155,8 @@ class ExpPostProcess:
         min_lim = min_time if use_cutoff else 0
         max_lim = max_time if use_cutoff else 0.2
         plt.xlim(min_lim, max_lim)
+        if y_lim is not None:
+            plt.ylim(y_lim[0], y_lim[1])
         plt.tight_layout()
         plt.show()
 
@@ -292,7 +294,7 @@ class PostPlots:
             None
         """
         force_target: str = self.dict_search(force)
-        
+
         exp_df_no_tuple = self.exp_df.copy()
         for force_i in ["CL", "CD", "CM"]:
             exp_df_no_tuple[force_i] = exp_df_no_tuple[force_i].apply(lambda x: x[0])
@@ -301,8 +303,8 @@ class PostPlots:
 
         # Ensure aoa_values is a list
 
-        max_val ={"CL": 0.38, "CD": 0.25, "CM": 0.1}[force_target]      
-        
+        max_val = {"CL": 0.38, "CD": 0.25, "CM": 0.1}[force_target]
+
         fig, axs = plt.subplots(figsize=(5, 4))
 
         # Data sort
@@ -659,7 +661,7 @@ def bold_text(text):
 
 
 def percent_error(est, true):
-    return np.abs(est - true) / (true+1e-10) * 100
+    return np.abs(est - true) / (true + 1e-10) * 100
 
 
 def weighted_mape(y_true, y_pred, std_values):
@@ -830,22 +832,26 @@ if __name__ == "__main__":
     plt.savefig("base_pressure.png", dpi=300)
     plt.show(block=True)
     # %% testing aoa= 5, d = 10 for fin config
-    # fin_5 = ExpPostProcess(
-    #     fin_config_data[5][10][0],
-    #     "fin",
-    #     5,
-    #     10,
-    # )
+    fin_5 = ExpPostProcess(
+        fin_config_data[5][10][0],
+        "fin",
+        5,
+        10,
+    )
     # fin_5.plot_avg("lift")
     # fin_5.plot_avg("drag")
     # fin_5.plot_avg("moment")
-    flap_5_40k = ExpPostProcess(fin_config_data[5][10][-1], "fin", 5, 10).plot_avg(
-        "drag"
+    fin_5_40k = ExpPostProcess(fin_config_data[5][10][-1], "fin", 5, 10).plot_avg(
+        "drag", y_lim=[-150, 150]
     )
-    fin_0 = ExpPostProcess(fin_config_data[0][10][0], "fin", 0, 10)
-    fin_0.plot_avg("lift")
-    fin_0.plot_avg("drag")
-    fin_0.plot_avg("moment")
+
+    fin_5_10k = ExpPostProcess(fin_config_data[5][10][0], "fin", 5, 10).plot_avg(
+        "drag", y_lim=[-150, 150]
+    )
+    # fin_0 = ExpPostProcess(fin_config_data[0][10][0], "fin", 0, 10)
+    # fin_0.plot_avg("lift")
+    # fin_0.plot_avg("drag")
+    # fin_0.plot_avg("moment")
     # %% post processing coefficients
     fin_post_df = process_data_to_dataframe(fin_config_data, condition_dict, "Fin")
     flap_post_df = process_data_to_dataframe(flap_config_data, condition_dict, "Flap")
