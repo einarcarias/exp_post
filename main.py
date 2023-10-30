@@ -120,7 +120,7 @@ class ExpPostProcess:
         plt.grid(which="both")
         plt.show()
 
-    def plot_avg(self, force, use_cutoff=False):
+    def plot_avg(self, force, use_cutoff=False, y_lim=None):
         dict = {"moment": 3, "lift": 1, "drag": 2}
         column = dict[force]
         self.get_avg(force)
@@ -154,6 +154,8 @@ class ExpPostProcess:
         min_lim = min_time if use_cutoff else 0
         max_lim = max_time if use_cutoff else 0.2
         plt.xlim(min_lim, max_lim)
+        if y_lim is not None:
+            plt.ylim(y_lim[0], y_lim[1])
         plt.tight_layout()
         plt.show()
 
@@ -839,12 +841,12 @@ if __name__ == "__main__":
     plt.savefig("base_pressure.png", dpi=300)
     # plt.show(block=True)
     # %% testing aoa= 5, d = 10 for fin config
-    # fin_5 = ExpPostProcess(
-    #     fin_config_data[5][10][0],
-    #     "fin",
-    #     5,
-    #     10,
-    # )
+    fin_5 = ExpPostProcess(
+        fin_config_data[5][10][0],
+        "fin",
+        5,
+        10,
+    )
     # fin_5.plot_avg("lift")
     # fin_5.plot_avg("drag")
     # fin_5.plot_avg("moment")
