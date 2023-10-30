@@ -954,10 +954,11 @@ if __name__ == "__main__":
     # fin
     fin_plot = PostPlots(cfd_fin, fin_post_df, inviscid_fin)
     flap_plot = PostPlots(cfd_flap, flap_post_df, inviscid_flap)
+    
     for aoa in [0, 5]:
-        # fin_plot.plot_aoa(aoa, "lift")
-        # fin_plot.plot_aoa(aoa, "drag")
-        # fin_plot.plot_aoa(aoa, "moment")
+        fin_plot.plot_aoa(aoa, "lift")
+        fin_plot.plot_aoa(aoa, "drag")
+        fin_plot.plot_aoa(aoa, "moment")
         # flap
         flap_plot.plot_aoa(aoa, "lift")
         flap_plot.plot_aoa(aoa, "drag")
