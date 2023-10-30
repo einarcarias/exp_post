@@ -1,21 +1,21 @@
-from matplotlib import pyplot as plt
-import matplotlib as mpl
-import pandas as pd
-from pathlib import Path
 import os
-from statsmodels.tsa.seasonal import STL
-from scipy.fft import fft, fftfreq, ifft
-from scipy.signal import welch
-from scipy.signal import butter, filtfilt
-from scipy import signal
-from scipy.interpolate import interp1d as interp
-import numpy as np
-import cmasher as cmr
 import random
 import re
-from typing import Dict, Union, List
-import sympy as sym
+from pathlib import Path
+from typing import Dict, List, Union
+
+import cmasher as cmr
+import matplotlib as mpl
+import numpy as np
+import pandas as pd
 import scienceplots
+import sympy as sym
+from matplotlib import pyplot as plt
+from scipy import signal
+from scipy.fft import fft, fftfreq, ifft
+from scipy.interpolate import interp1d as interp
+from scipy.signal import butter, filtfilt, welch
+from statsmodels.tsa.seasonal import STL
 
 plt.style.use(["science", "bright"])
 plt.rcParams.update(
@@ -280,7 +280,7 @@ class PostPlots:
         }
         return force_dict[force]
 
-    def plot_aoa(self, aoa_values: float, force: str) -> None:
+    def plot_aoa(self, aoa_values: float, force: str, config: str) -> None:
         """
         Plot scatter plots with error bars for angle of attack (aoa) value(s)
         and a specified force type.
@@ -311,18 +311,19 @@ class PostPlots:
         exp = self.exp_df.query(f"aoa == {str(aoa_values)}")
         invis = self.invis_df.query(f"aoa == {str(aoa_values)}")
 
-        axs.scatter(
+        axs.plot(
             cfd["deflection"],
             cfd[force_target],
             marker="^",
-            edgecolors="k",
+            linestyle="--",
             label=rf"CFD",
         )
-        axs.scatter(
+        axs.plot(
             invis["deflection"],
             invis[force_target],
-            marker="o",
-            edgecolors="k",
+            marker="None",
+            linestyle="-",
+            linewidth=1.5,
             label=f"Inviscid Code",
         )
         axs.scatter(
@@ -347,7 +348,7 @@ class PostPlots:
         plt.xlim([-0.1, cfd["deflection"].max() + 0.5])
         axs.legend(loc="best")
         fig.tight_layout()
-        plt.savefig(f"{force}_aoa{aoa_values}_comparison.png", dpi=300)
+        plt.savefig(f"{force}_aoa{aoa_values}_comparison_{config}.png", dpi=300)
         plt.show(block=True)
 
 
@@ -838,7 +839,7 @@ if __name__ == "__main__":
     plt.tight_layout()
 
     plt.savefig("base_pressure.png", dpi=300)
-    plt.show(block=True)
+    # plt.show(block=True)
     # %% testing aoa= 5, d = 10 for fin config
     fin_5 = ExpPostProcess(
         fin_config_data[5][10][0],
@@ -850,7 +851,7 @@ if __name__ == "__main__":
     # fin_5.plot_avg("drag")
     # fin_5.plot_avg("moment")
     fin_0 = ExpPostProcess(flap_config_data[5][17.5][3], "flap", 5, 17.5)
-    fin_0.plot_avg("moment")
+    # fin_0.plot_avg("moment")
     # %% post processing coefficients
     fin_post_df = process_data_to_dataframe(fin_config_data, condition_dict, "Fin")
     flap_post_df = process_data_to_dataframe(flap_config_data, condition_dict, "Flap")
@@ -954,15 +955,18 @@ if __name__ == "__main__":
     # fin
     fin_plot = PostPlots(cfd_fin, fin_post_df, inviscid_fin)
     flap_plot = PostPlots(cfd_flap, flap_post_df, inviscid_flap)
-    
-    for aoa in [0, 5]:
-        fin_plot.plot_aoa(aoa, "lift")
-        fin_plot.plot_aoa(aoa, "drag")
-        fin_plot.plot_aoa(aoa, "moment")
-        # flap
-        flap_plot.plot_aoa(aoa, "lift")
-        flap_plot.plot_aoa(aoa, "drag")
-        flap_plot.plot_aoa(aoa, "moment")
+    toggle = 1
+    if toggle == 1:
+        for aoa in [0, 5]:
+            # flap
+            flap_plot.plot_aoa(aoa, "lift", "flap")
+            flap_plot.plot_aoa(aoa, "drag", "flap")
+            flap_plot.plot_aoa(aoa, "moment", "flap")
+    else:
+        for aoa in [0, 5]:
+            fin_plot.plot_aoa(aoa, "lift", "fin")
+            fin_plot.plot_aoa(aoa, "drag", "fin")
+            fin_plot.plot_aoa(aoa, "moment", "fin")
     # %% error compared with experiment
     combined = fin_post_df.merge(inviscid_fin, on=["aoa", "deflection"])
     exp_fin_df_copy = fin_post_df.copy()
