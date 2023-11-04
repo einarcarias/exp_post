@@ -311,14 +311,15 @@ class PostPlots:
         exp = self.exp_df.query(f"aoa == {str(aoa_values)}")
         invis = self.invis_df.query(f"aoa == {str(aoa_values)}")
 
-        axs.plot(
+        (cfd_plot,) = axs.plot(
             cfd["deflection"],
             cfd[force_target],
             marker="^",
             linestyle="--",
             label=rf"CFD",
         )
-        axs.plot(
+        print(f"CFD plot color {cfd_plot.get_color()}")
+        (code_plot,) = axs.plot(
             invis["deflection"],
             invis[force_target],
             marker="None",
@@ -326,6 +327,7 @@ class PostPlots:
             linewidth=1.5,
             label=f"Inviscid Code",
         )
+        print(f"Inviscid code plot color {code_plot.get_color()}")
         axs.scatter(
             exp["deflection"],
             exp[force_target].apply(lambda x: x[0]),
