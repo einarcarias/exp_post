@@ -26,6 +26,8 @@ plt.rcParams.update(
     }
 )
 dir_path = os.path.dirname(os.path.realpath(__file__))
+# default dpi 300 when saving
+plt.rcParams["savefig.dpi"] = 300
 
 
 class ExpPostProcess:
@@ -48,7 +50,7 @@ class ExpPostProcess:
         self.df = pd.read_csv(filename, delimiter="\t", dtype=np.float64)
         self.test_type()
         self.sampling_rate = self.get_sampling_rate()
-        self.averaging_window = 80 if self.sampling_rate < 10006 else 200
+        self.averaging_window = 60 if self.sampling_rate < 10006 else 200
         self.label = self.name() if label is None else label
 
         os.chdir(dir_path)
@@ -77,24 +79,12 @@ class ExpPostProcess:
     def get_drag_raw(self):
         return self.df.iloc[:, 2]
 
-    def get_minmax(self, force):
-        dict = {"moment": 3, "lift": 1, "drag": 2}
-        column = dict[force]
-        dict_aoa0_time = (
-            {1: (0.0230, 0.0405), 2: (0.0203, 0.0436), 3: (0.0257, 0.0375)}
-            if self.test_number >= 24
-            else {1: (0.0460, 0.0645), 2: (0.0460, 0.0645), 3: (0.0460, 0.0645)}
-        )
-        dict_aoa5_time = (
-            {1: (0.0268, 0.0449), 2: (0.0209, 0.0453), 3: (0.0254, 0.0451)}
-            if self.test_number >= 24
-            else {1: (0.0495, 0.0645), 2: (0.0460, 0.0645), 3: (0.0460, 0.0645)}
-        )
-
-        min_time, max_time = (
-            dict_aoa0_time[column] if self.aoa == 0 else dict_aoa5_time[column]
-        )
-
+    def get_minmax(self):
+        file_loc = self.data_dir / "exp_time_avg.csv"
+        pd_time_avg = pd.read_csv(file_loc, dtype=np.float64, index_col=0)
+        test_num = self.test_number
+        min_time = pd_time_avg.loc[test_num]["Time min"]
+        max_time = pd_time_avg.loc[test_num]["Time max"]
         return min_time, max_time
 
     def dict_search(self, force):
@@ -124,7 +114,7 @@ class ExpPostProcess:
         dict = {"moment": 3, "lift": 1, "drag": 2}
         column = dict[force]
         self.get_avg(force)
-        min_time, max_time = self.get_minmax(force)
+        min_time, max_time = self.get_minmax()
 
         # Plotting original and smoothed data
         plt.figure(figsize=(6, 3))
@@ -140,6 +130,7 @@ class ExpPostProcess:
             label=f"Moving Average",
             color="red",
         )
+
         plt.axvline(x=min_time, color="black", linestyle="--")
         plt.axvline(x=max_time, color="black", linestyle="--")
         plt.xlabel(bold_text("Time(s)"))
@@ -149,8 +140,11 @@ class ExpPostProcess:
             )
         )
         # plt.title(f"Centered Moving Average Smoothing for {self.name()}")
+        # add white background to legend
 
-        plt.legend(loc="lower right")
+        legend = plt.legend(loc="lower right", frameon=1, facecolor="white", framealpha=1)
+        frame = legend.get_frame()
+        frame.set_linewidth(0.0)
         min_lim = min_time if use_cutoff else 0
         max_lim = max_time if use_cutoff else 0.2
         plt.xlim(min_lim, max_lim)
@@ -169,7 +163,7 @@ class ExpPostProcess:
         smooth = self.df.iloc[:, column].rolling(window=window, center=True).mean()
         smooth.fillna(0, inplace=True)
         self.df[f"smooth {dict[force]}"] = smooth
-        min_time, max_time = self.get_minmax(force)
+        min_time, max_time = self.get_minmax()
         relevant_data = (self.df.iloc[:, 0] >= min_time) & (
             self.df.iloc[:, 0] <= max_time
         )
@@ -202,8 +196,39 @@ class ExpPostProcess:
             {"freq": f, "psd": Pxx_den, "label": self.label, "config": self.config}
         )
 
+    def rms(self, force):
+        force_data = self.dict_search(force)
+        time = self.get_time_raw()
+        window = self.averaging_window
+        zero_mean = force_data.pow(2).rolling(window, center=True).std(ddof=0)
+        zero_mean.fillna(0, inplace=True)
+        smooth = (
+            force_data.pow(2).rolling(window=window, center=True).mean().apply(np.sqrt)
+        )
+        smooth_rolling_av = force_data.rolling(window=window, center=True).mean()
+        smooth_rolling_av.fillna(0, inplace=True)
+        min_time, max_time = self.get_minmax()
+        # plot
+        fig, ax = plt.subplots(figsize=(6, 3))
+        ax.plot(time, force_data, c="b", label="Original")
+        ax.plot(time, smooth, c="r", label="Smooth")
+        # ax.plot(time, zero_mean, c="g", label="Zero Mean")
+        ax.plot(time, smooth_rolling_av, c="k", label="Smooth Rolling Average")
+        ax.legend()
+        plt.xlabel(bold_text("Time(s)"))
+        plt.ylabel(
+            bold_text(
+                f"{force.capitalize()} Force ({'N' if force in ['lift','drag'] else 'Nm'})"
+            )
+        )
+        plt.xlim(0, 0.2)
+        plt.tight_layout()
+        plt.axvline(x=min_time, color="black", linestyle="--")
+        plt.axvline(x=max_time, color="black", linestyle="--")
+        plt.show()
+
     @staticmethod
-    def plot_freq_domain(data):
+    def plot_freq_domain(data, xmin=None, xmax=None):
         cmap = mpl.colormaps["viridis"]
         fig, ax = plt.subplots(figsize=(10, 4))
         for i in data:
@@ -234,6 +259,10 @@ class ExpPostProcess:
         ax.grid(which="minor", linestyle=":", linewidth="0.5", color="gray")
         # ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), ncols=len(data) / 4)
         ax.set_ylim(0, 2e2)
+        if xmin is not None:
+            fig.set_size_inches(5, 4)
+            ax.set_xlim(xmin, xmax)
+            ax.xaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
         plt.xlabel(bold_text("Frequency, Hz"))
         plt.ylabel(bold_text("PSD, N$\mathrm{^2}$/Hz"))
         plt.tight_layout()
@@ -819,6 +848,12 @@ if __name__ == "__main__":
         "sting_diam": 15.875e-3,
         "mach": 8.2,
     }
+    # %% testing rms
+    fin_5 = ExpPostProcess(fin_config_data[5][10][-1], "fin", 5, 10)
+    fin_5.plot_avg("drag")
+    fin_5.plot_avg("lift")
+    fin_5.plot_avg("moment")
+
     # %% testing base pressure correction class
     mach = np.linspace(1, 8.4, 1000)
     base_pressure = BasePressureCalc(mach)
@@ -957,7 +992,7 @@ if __name__ == "__main__":
     # fin
     fin_plot = PostPlots(cfd_fin, fin_post_df, inviscid_fin)
     flap_plot = PostPlots(cfd_flap, flap_post_df, inviscid_flap)
-    toggle = 1
+    toggle = 0
     if toggle == 1:
         for aoa in [0, 5]:
             # flap
@@ -1059,4 +1094,7 @@ if __name__ == "__main__":
         welch_res_5.append(i.find_welch(force_to_check))
 
     ExpPostProcess.plot_freq_domain(welch_res_0)
+
+    ExpPostProcess.plot_freq_domain(welch_res_0, xmax=200, xmin=20)
     ExpPostProcess.plot_freq_domain(welch_res_5)
+    ExpPostProcess.plot_freq_domain(welch_res_5, xmax=200, xmin=20)
