@@ -66,7 +66,7 @@ class ExpPostProcess:
     def get_moment_raw(self):
         return self.df.iloc[:, 3]
 
-    def get_lift_raw(self):
+    def get_normal_raw(self):
         return self.df.iloc[:, 1]
 
     def get_time_raw(self):
@@ -76,7 +76,7 @@ class ExpPostProcess:
         time = self.get_time_raw()
         return int(len(time) / (time.iloc[-1] - time.iloc[0]))
 
-    def get_drag_raw(self):
+    def get_axial_raw(self):
         return self.df.iloc[:, 2]
 
     def get_minmax(self):
@@ -90,13 +90,12 @@ class ExpPostProcess:
     def dict_search(self, force):
         force_dict = {
             "moment": self.get_moment_raw(),
-            "lift": self.get_lift_raw(),
-            "drag": self.get_drag_raw(),
+            "normal": self.get_normal_raw(),
+            "axial": self.get_axial_raw(),
         }
         return force_dict[force]
 
     def plot_raw(self, force):
-        force_name = force
         force = self.dict_search(force)
         time = self.get_time_raw()
         force_avg = force.rolling(window=self.averaging_window, center=True).mean()
@@ -105,13 +104,13 @@ class ExpPostProcess:
         plt.plot(time, force_avg, color="red")
         plt.xlabel("Time")
         plt.ylabel(
-            f"{force.capitalize()} Force ({'N' if force in ['lift','drag'] else 'Nm'})"
+            f"{force.capitalize()} Force ({'N' if force in ['normal','axial'] else 'Nm'})"
         )
         plt.grid(which="both")
         plt.show()
 
     def plot_avg(self, force, use_cutoff=False, y_lim=None):
-        dict = {"moment": 3, "lift": 1, "drag": 2}
+        dict = {"moment": 3, "normal": 1, "axial": 2}
         column = dict[force]
         self.get_avg(force)
         min_time, max_time = self.get_minmax()
@@ -136,13 +135,15 @@ class ExpPostProcess:
         plt.xlabel(bold_text("Time(s)"))
         plt.ylabel(
             bold_text(
-                f"{force.capitalize()} Force ({'N' if force in ['lift','drag'] else 'Nm'})"
+                f"{force.capitalize()} {'Force (N' if force in ['normal','axial'] else '(Nm'})"
             )
         )
         # plt.title(f"Centered Moving Average Smoothing for {self.name()}")
         # add white background to legend
 
-        legend = plt.legend(loc="lower right", frameon=1, facecolor="white", framealpha=1)
+        legend = plt.legend(
+            loc="lower right", frameon=1, facecolor="white", framealpha=1
+        )
         frame = legend.get_frame()
         frame.set_linewidth(0.0)
         min_lim = min_time if use_cutoff else 0
@@ -157,7 +158,7 @@ class ExpPostProcess:
         return rf"{self.config}, $\alpha$={self.aoa}, $\delta$ = {self.deflection}"
 
     def get_avg(self, force):
-        dict = {"moment": 3, "lift": 1, "drag": 2}
+        dict = {"moment": 3, "normal": 1, "axial": 2}
         column = dict[force]
         window = self.averaging_window
         smooth = self.df.iloc[:, column].rolling(window=window, center=True).mean()
@@ -171,7 +172,7 @@ class ExpPostProcess:
         std = self.df.loc[indices, [f"smooth {dict[force]}"]].std()
         avg_force = self.df.loc[indices, [f"smooth {dict[force]}"]].mean()
 
-        return avg_force, std
+        return avg_force[0], std[0]
 
     def cut_data(self, start_time, end_time):
         # reset index
@@ -357,13 +358,7 @@ class PostPlots:
             label=f"Inviscid Code",
         )
         print(f"Inviscid code plot color {code_plot.get_color()}")
-        axs.scatter(
-            exp["deflection"],
-            exp[force_target].apply(lambda x: x[0]),
-            marker="s",
-            c="k",
-            label="Experiment",
-        )
+
         axs.errorbar(
             exp["deflection"],
             exp[force_target].apply(lambda x: x[0]),
@@ -371,6 +366,13 @@ class PostPlots:
             fmt="none",
             c="k",
             capsize=5,
+        )
+        axs.scatter(
+            exp["deflection"],
+            exp[force_target].apply(lambda x: x[0]),
+            marker="s",
+            c="k",
+            label="Experiment",
         )
 
         axs.set_xlabel(bold_text("Deflection Angle (deg)"))
@@ -439,9 +441,78 @@ class ErrorAnalysis:
         self.diameter, self.diameter_std = boundary_conditions["diameter"]
 
     def coef_calc(self, force):
-        force_avg, force_std = self.ExpPostProcess_object.get_avg(force)
+        # obtain normal and axial forces std and avg
+        def calculate_drag_avg_std(
+            avg_normal, std_normal, avg_axial, std_axial, avg_alpha, std_alpha
+        ):
+            # Convert angle from degrees to radians
+            avg_alpha_rad = np.radians(avg_alpha)
+            std_alpha_rad = np.radians(std_alpha)
+
+            # Calculate average lift using the respective means of normal, axial coefficients, and alpha
+            avg_drag = cd_calc(avg_axial, avg_normal, avg_alpha_rad)
+            # Calculate variance of lift using the standard deviations assuming independence
+            var_drag = (
+                (np.cos(avg_alpha_rad)) ** 2 * std_axial**2
+                + (np.sin(avg_alpha_rad)) ** 2 * std_normal**2
+                + avg_axial**2 * (np.cos(avg_alpha_rad)) ** 2 * std_alpha_rad**2
+                + avg_normal**2 * (np.sin(avg_alpha_rad)) ** 2 * std_alpha_rad**2
+            )
+
+            # Convert variance to standard deviation
+            std_drag = np.sqrt(var_drag)
+
+            return avg_drag, std_drag
+
+        def calculate_lift_avg_std(
+            avg_normal, std_normal, avg_axial, std_axial, avg_alpha, std_alpha
+        ):
+            # Convert angle from degrees to radians
+            avg_alpha_rad = np.radians(avg_alpha)
+            std_alpha_rad = np.radians(std_alpha)
+
+            # Calculate average drag using the respective means of normal, axial coefficients, and alpha
+            avg_lift = cl_calc(avg_axial, avg_normal, avg_alpha_rad)
+            # Calculate the variance of the drag coefficient assuming statistical independence
+            var_lift = (
+                (np.sin(avg_alpha_rad)) ** 2 * std_axial**2
+                + (np.cos(avg_alpha_rad)) ** 2 * std_normal**2
+                + avg_axial**2 * (np.sin(avg_alpha_rad)) ** 2 * std_alpha_rad**2
+                + avg_normal**2 * (np.cos(avg_alpha_rad)) ** 2 * std_alpha_rad**2
+            )
+
+            # Convert variance to standard deviation
+            std_lift = np.sqrt(var_lift)
+
+            return avg_lift, std_lift
+
+        aoa_std = 0.1
+        normal_avg, normal_std = self.ExpPostProcess_object.get_avg("normal")
+        axial_avg, axial_std = self.ExpPostProcess_object.get_avg("axial")
+
+        if force == "lift":
+            force_avg, force_std = calculate_lift_avg_std(
+                normal_avg,
+                normal_std,
+                axial_avg,
+                axial_std,
+                self.ExpPostProcess_object.aoa,
+                aoa_std,
+            )
+        elif force == "drag":
+            force_avg, force_std = calculate_drag_avg_std(
+                normal_avg,
+                normal_std,
+                axial_avg,
+                axial_std,
+                self.ExpPostProcess_object.aoa,
+                aoa_std,
+            )
+        else:
+            force_avg, force_std = self.ExpPostProcess_object.get_avg(force)
+
         force_coef = force_avg / (
-            0.5 * self.rho * self.velocity**2 * ((np.pi * self.diameter**2 / 4))
+            0.5 * self.rho * self.velocity**2 * (np.pi * self.diameter**2 / 4)
             if force in ["lift", "drag"]
             else 0.5
             * self.rho
@@ -480,6 +551,14 @@ class ErrorAnalysis:
 
 
 # %% functions
+def cl_calc(axial, normal, aoa):
+    return (-axial * np.sin(aoa)) + (normal * np.cos(aoa))
+
+
+def cd_calc(axial, normal, aoa):
+    return (axial * np.cos(aoa)) + (normal * np.sin(aoa))
+
+
 def process_data_to_dataframe(config_data, condition_dict, config_name):
     """
     Process and organize the data based on angle of attack (aoa), deflection,
@@ -790,9 +869,8 @@ class BasePressureCalc:
         return interp_func(self.mach_list)
 
 
-if __name__ == "__main__":
-    # data file dictionary
-    # modify accordingly
+# NOTES: CONSTANTS
+def data_dicts():
     sting_test = {"tap": ["tap.csv", "tap2.csv"], "background": "background.csv"}
     bicone_data = {
         0: ["TR001.csv", "TR007.csv", "TR008.csv"],
@@ -833,7 +911,10 @@ if __name__ == "__main__":
             17.5: ["TR015.csv", "TR017.csv", "TR019.csv", "TR033.csv"],
         },
     }
+    return sting_test, bicone_data, fin_config_data, flap_config_data
 
+
+def tunnel_conditions():
     rho = 0.0371
     rho_std = 7.1 / 100 * rho  # in percent
     velocity = 1553
@@ -848,48 +929,17 @@ if __name__ == "__main__":
         "sting_diam": 15.875e-3,
         "mach": 8.2,
     }
-    # %% testing rms
-    fin_5 = ExpPostProcess(fin_config_data[5][10][-1], "fin", 5, 10)
-    fin_5.plot_avg("drag")
-    fin_5.plot_avg("lift")
-    fin_5.plot_avg("moment")
+    return condition_dict
 
-    # %% testing base pressure correction class
-    mach = np.linspace(1, 8.4, 1000)
-    base_pressure = BasePressureCalc(mach)
-    honeywell = base_pressure.honeywell()
-    gabeaud = base_pressure.gabeaud()
-    love = base_pressure.love()
-    fig, ax = plt.subplots(figsize=(5, 4))
-    linew = 1.5
 
-    ax.plot(mach, honeywell, label="Honeywell", linewidth=linew, c="k", linestyle=":")
-    ax.plot(mach, gabeaud, label="Gabeaud", linewidth=linew, c="k", linestyle="--")
-    ax.plot(mach, love, label="Love (Curve fit)", linewidth=linew, c="k", linestyle="-")
-    ax.set_xlabel(bold_text(r"Freestream Mach Number, M\boldmath$_\infty$"))
-    ax.set_ylabel(bold_text(r"Base Pressure Coefficient, C\boldmath$_{P_B}$"))
-    # reverse the y axis
-    ax.invert_yaxis()
-    ax.legend()
-    ax.set_xlim(1, 8.4)
+def main():
+    # NOTE: THIS MAIN FUNCTION OUTPUTS THE PLOTS FOR EXPERIMNTAL COMPARISON WITH NUMERICAL METHODS
 
-    plt.tight_layout()
+    # data file dictionary
+    # modify accordingly
+    sting_test, bicone_data, fin_config_data, flap_config_data = data_dicts()
+    condition_dict = tunnel_conditions()
 
-    plt.savefig("base_pressure.png", dpi=300)
-    # plt.show(block=True)
-    # %% testing aoa= 5, d = 10 for fin config
-    fin_5 = ExpPostProcess(
-        fin_config_data[5][10][0],
-        "fin",
-        5,
-        10,
-    )
-    # fin_5.plot_avg("lift")
-    # fin_5.plot_avg("drag")
-    # fin_5.plot_avg("moment")
-    fin_0 = ExpPostProcess(flap_config_data[5][17.5][3], "flap", 5, 17.5)
-    # fin_0.plot_avg("moment")
-    # %% post processing coefficients
     fin_post_df = process_data_to_dataframe(fin_config_data, condition_dict, "Fin")
     flap_post_df = process_data_to_dataframe(flap_config_data, condition_dict, "Flap")
 
@@ -992,7 +1042,7 @@ if __name__ == "__main__":
     # fin
     fin_plot = PostPlots(cfd_fin, fin_post_df, inviscid_fin)
     flap_plot = PostPlots(cfd_flap, flap_post_df, inviscid_flap)
-    toggle = 0
+    toggle = 1
     if toggle == 1:
         for aoa in [0, 5]:
             # flap
@@ -1004,25 +1054,51 @@ if __name__ == "__main__":
             fin_plot.plot_aoa(aoa, "lift", "fin")
             fin_plot.plot_aoa(aoa, "drag", "fin")
             fin_plot.plot_aoa(aoa, "moment", "fin")
-    # %% error compared with experiment
-    combined = fin_post_df.merge(inviscid_fin, on=["aoa", "deflection"])
-    exp_fin_df_copy = fin_post_df.copy()
-    fin_error = []
 
-    for i in ["CL", "CD", "CM"]:
-        cfd_val = cfd_fin.query(f"aoa == [0] and deflection == [0,5,10]")[i]
-        invis_val = inviscid_fin.query(f"aoa == [0] and deflection == [0,5,10]")[i]
-        exp_val = exp_fin_df_copy.query(f"aoa == [0] and deflection == [0,5,10]")[
-            i
-        ].apply(lambda x: x[0])
-        exp_std = exp_fin_df_copy.query(f"aoa == [0] and deflection == [0,5,10]")[
-            i
-        ].apply(lambda x: x[1])
-        cfd_error = weighted_mae(exp_val, cfd_val, exp_std)
-        invis_error = weighted_mae(exp_val, invis_val, exp_std)
-        fin_error.append([cfd_error, invis_error])
 
+def main_avg_timesieres():
+    sting_test, bicone_data, fin_config_data, flap_config_data = data_dicts()
+    fin_a5_d10 = fin_config_data[5][10][-1]
+    fin_a0_d10 = fin_config_data[0][10][0]
+    fin_a5_d10 = ExpPostProcess(fin_a5_d10, "Fin", 5, 10)
+    fin_a0_d10 = ExpPostProcess(fin_a0_d10, "Fin", 0, 10)
+    [fin_a5_d10.plot_avg(force) for force in ["normal", "axial", "moment"]]
+    [fin_a0_d10.plot_avg(force) for force in ["normal", "axial", "moment"]]
+
+    pass
+
+
+def main_base_pres():
+    # %% testing base pressure correction class
+    mach = np.linspace(1, 8.4, 1000)
+    base_pressure = BasePressureCalc(mach)
+    honeywell = base_pressure.honeywell()
+    gabeaud = base_pressure.gabeaud()
+    love = base_pressure.love()
+    fig, ax = plt.subplots(figsize=(5, 4))
+    linew = 1.5
+
+    ax.plot(mach, honeywell, label="Honeywell", linewidth=linew, c="k", linestyle=":")
+    ax.plot(mach, gabeaud, label="Gabeaud", linewidth=linew, c="k", linestyle="--")
+    ax.plot(mach, love, label="Love (Curve fit)", linewidth=linew, c="k", linestyle="-")
+    ax.set_xlabel(bold_text(r"Freestream Mach Number, M\boldmath$_\infty$"))
+    ax.set_ylabel(bold_text(r"Base Pressure Coefficient, C\boldmath$_{P_B}$"))
+    # reverse the y axis
+    ax.invert_yaxis()
+    ax.legend()
+    ax.set_xlim(1, 8.4)
+
+    plt.tight_layout()
+
+    plt.savefig("base_pressure.png", dpi=300)
+    # plt.show(block=True)
+    # %% testing aoa= 5, d = 10 for fin config
+    pass
+
+
+def main_freq():
     # %% frequency domain
+    sting_test, bicone_data, fin_config_data, flap_config_data = data_dicts()
     force_to_check = "lift"
     tap = [
         ExpPostProcess(tap_i, config_i, "N/A", "N/A")
@@ -1098,3 +1174,10 @@ if __name__ == "__main__":
     ExpPostProcess.plot_freq_domain(welch_res_0, xmax=200, xmin=20)
     ExpPostProcess.plot_freq_domain(welch_res_5)
     ExpPostProcess.plot_freq_domain(welch_res_5, xmax=200, xmin=20)
+    pass
+
+
+if __name__ == "__main__":
+    # main()
+    main_avg_timesieres()
+    exit()
