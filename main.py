@@ -97,17 +97,18 @@ class ExpPostProcess:
         return force_dict[force]
 
     def plot_raw(self, force):
+        force_name = force
         force = self.dict_search(force)
         time = self.get_time_raw()
         force_avg = force.rolling(window=self.averaging_window, center=True).mean()
         plt.figure(figsize=(6, 3))
         plt.plot(time, force)
         plt.plot(time, force_avg, color="red")
-        plt.xlabel("Time")
+        plt.xlabel(bold_text("Time(s)"))
         plt.ylabel(
-            f"{force.capitalize()} Force ({'N' if force in ['normal','axial'] else 'Nm'})"
+            bold_text(f"{force_name.capitalize()} Force ({'N' if force_name in ['normal','axial'] else 'Nm'})")
         )
-        plt.grid(which="both")
+        plt.xlim(0, 0.2)
         plt.show()
 
     def plot_avg(self, force, use_cutoff=False, y_lim=None):
@@ -122,7 +123,6 @@ class ExpPostProcess:
             self.df.iloc[:, 0],
             self.df.iloc[:, column],
             label="Original Data",
-            color="blue",
         )
         plt.plot(
             self.df.iloc[:, 0],
@@ -273,6 +273,108 @@ class ExpPostProcess:
 
         plt.show(block=True)
 
+
+class ExpPostProcess_past(ExpPostProcess):
+    def __init__(
+        self,
+        filename,
+        config,
+        aoa,
+        deflection,
+        label=None,
+    ):
+        super().__init__(filename, config, aoa, deflection, label=None)
+
+    # getters for raw data
+
+    def get_axial_raw(self):
+        return self.df.iloc[:, 1]
+
+    def get_time_raw(self):
+        return self.df.iloc[:, 0]
+
+    def get_moment_raw(self):
+        print("Moment data not available for this test.")
+
+    def get_normal_raw(self):
+        print("Normal data not available for this test.")
+
+    def get_time_raw(self):
+        return self.df.iloc[:, 0]
+
+    @staticmethod
+    def plot_freq_domain(data, xmin=None, xmax=None):
+        cmap = mpl.colormaps["viridis"]
+        fig, ax = plt.subplots(figsize=(10, 4))
+        lwidth = 1
+        ax.loglog(
+            data["freq"],
+            data["psd"],
+            linewidth=lwidth,
+            label="test",
+            alpha=0.4,
+        )
+        ax.yaxis.set_minor_locator(mpl.ticker.AutoMinorLocator())
+        ax.minorticks_on()
+        ax.grid(which="minor", linestyle=":", linewidth="0.5", color="gray")
+        # ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), ncols=len(data) / 4)
+        ax.set_ylim(0, 2e2)
+        if xmin is not None:
+            fig.set_size_inches(5, 4)
+            ax.set_xlim(xmin, xmax)
+            ax.xaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
+        plt.xlabel(bold_text("Frequency, Hz"))
+        plt.ylabel(bold_text("PSD, N$\mathrm{^2}$/Hz"))
+        plt.tight_layout()
+
+        # add legend outside the plot window below
+
+        plt.show()
+
+    def plot_avg(self, force):
+        dict = {"moment": 3, "normal": 1, "axial": 2}
+        column = dict[force]
+        self.get_avg(force)
+        min_time, max_time = self.get_minmax()
+
+        # Plotting original and smoothed data
+        plt.figure(figsize=(6, 3))
+        plt.plot(
+            self.df.iloc[:, 0],
+            self.df.iloc[:, column],
+            label="Original Data",
+            color="blue",
+        )
+        plt.plot(
+            self.df.iloc[:, 0],
+            self.df[f"smooth {dict[force]}"],
+            label=f"Moving Average",
+            color="red",
+        )
+
+        plt.axvline(x=min_time, color="black", linestyle="--")
+        plt.axvline(x=max_time, color="black", linestyle="--")
+        plt.xlabel(bold_text("Time(s)"))
+        plt.ylabel(
+            bold_text(
+                f"{force.capitalize()} {'Force (N' if force in ['normal','axial'] else '(Nm'})"
+            )
+        )
+        # plt.title(f"Centered Moving Average Smoothing for {self.name()}")
+        # add white background to legend
+
+        legend = plt.legend(
+            loc="lower right", frameon=1, facecolor="white", framealpha=1
+        )
+        frame = legend.get_frame()
+        frame.set_linewidth(0.0)
+        min_lim = min_time if use_cutoff else 0
+        max_lim = max_time if use_cutoff else 0.2
+        plt.xlim(min_lim, max_lim)
+        if y_lim is not None:
+            plt.ylim(y_lim[0], y_lim[1])
+        plt.tight_layout()
+        plt.show()
 
 class PostPlots:
     """
@@ -1063,7 +1165,7 @@ def main():
     # fin
     fin_plot = PostPlots(cfd_fin, fin_post_df, inviscid_fin)
     flap_plot = PostPlots(cfd_flap, flap_post_df, inviscid_flap)
-    toggle = 1
+    toggle = 0
     if toggle == 1:
         for aoa in [0, 5]:
             # flap
@@ -1120,7 +1222,7 @@ def main_base_pres():
 def main_freq():
     # %% frequency domain
     sting_test, bicone_data, fin_config_data, flap_config_data = data_dicts()
-    force_to_check = "lift"
+    force_to_check = "normal"
     tap = [
         ExpPostProcess(tap_i, config_i, "N/A", "N/A")
         for tap_i, config_i in zip(sting_test["tap"], ["Tap 1", "Tap 2"])
@@ -1195,10 +1297,20 @@ def main_freq():
     ExpPostProcess.plot_freq_domain(welch_res_0, xmax=200, xmin=20)
     ExpPostProcess.plot_freq_domain(welch_res_5)
     ExpPostProcess.plot_freq_domain(welch_res_5, xmax=200, xmin=20)
+
+
+def old_data():
+    # old data
+    data_dir = Path("data")
+    # read file names from the directory with the extension .lvm
+    files = [filename for filename in os.listdir(data_dir) if filename.endswith(".lvm")]
+    test = ExpPostProcess_past(files[0], "past", "N/A", "N/A")
+    test.plot_raw("axial")
     pass
 
 
 if __name__ == "__main__":
-    # main_avg_timesieres()
-    main()
+    main_avg_timesieres()
+    # main()
+    # old_data()
     exit()
