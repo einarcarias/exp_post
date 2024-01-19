@@ -16,6 +16,7 @@ from scipy.fft import fft, fftfreq, ifft
 from scipy.interpolate import interp1d as interp
 from scipy.signal import butter, filtfilt, welch
 from statsmodels.tsa.seasonal import STL
+from numpy import pi, sin, cos, sqrt
 
 plt.style.use(["science", "bright"])
 plt.rcParams.update(
@@ -452,15 +453,26 @@ class ErrorAnalysis:
             # Calculate average lift using the respective means of normal, axial coefficients, and alpha
             avg_drag = cd_calc(avg_axial, avg_normal, avg_alpha_rad)
             # Calculate variance of lift using the standard deviations assuming independence
-            var_drag = (
-                (np.cos(avg_alpha_rad)) ** 2 * std_axial**2
-                + (np.sin(avg_alpha_rad)) ** 2 * std_normal**2
-                + avg_axial**2 * (np.cos(avg_alpha_rad)) ** 2 * std_alpha_rad**2
-                + avg_normal**2 * (np.sin(avg_alpha_rad)) ** 2 * std_alpha_rad**2
+            var_drag = sqrt(
+                (cos(avg_alpha_rad) * std_axial / avg_drag) ** 2
+                + (sin(avg_alpha_rad) * std_normal / avg_drag) ** 2
+                + (
+                    (
+                        (
+                            (
+                                -avg_axial * sin(avg_alpha_rad)
+                                + avg_normal * cos(avg_alpha_rad)
+                            )
+                            * std_alpha_rad
+                        )
+                        / avg_drag
+                    )
+                    ** 2
+                )
             )
 
             # Convert variance to standard deviation
-            std_drag = np.sqrt(var_drag)
+            std_drag = var_drag * avg_drag
 
             return avg_drag, std_drag
 
@@ -473,16 +485,25 @@ class ErrorAnalysis:
 
             # Calculate average drag using the respective means of normal, axial coefficients, and alpha
             avg_lift = cl_calc(avg_axial, avg_normal, avg_alpha_rad)
-            # Calculate the variance of the drag coefficient assuming statistical independence
-            var_lift = (
-                (np.sin(avg_alpha_rad)) ** 2 * std_axial**2
-                + (np.cos(avg_alpha_rad)) ** 2 * std_normal**2
-                + avg_axial**2 * (np.sin(avg_alpha_rad)) ** 2 * std_alpha_rad**2
-                + avg_normal**2 * (np.cos(avg_alpha_rad)) ** 2 * std_alpha_rad**2
+            # Calculate the variance of the lift coefficient assuming statistical independence
+            var_lift = sqrt(
+                (-sin(avg_alpha_rad) * std_axial / avg_lift) ** 2
+                + (cos(avg_alpha_rad) * std_normal / avg_lift) ** 2
+                + (
+                    (
+                        (
+                            -avg_axial * cos(avg_alpha_rad)
+                            - avg_normal * sin(avg_alpha_rad)
+                        )
+                        * std_alpha_rad
+                    )
+                    / avg_lift
+                )
+                ** 2
             )
 
             # Convert variance to standard deviation
-            std_lift = np.sqrt(var_lift)
+            std_lift = var_lift * avg_lift
 
             return avg_lift, std_lift
 
@@ -1178,6 +1199,6 @@ def main_freq():
 
 
 if __name__ == "__main__":
-    # main()
-    main_avg_timesieres()
+    # main_avg_timesieres()
+    main()
     exit()
