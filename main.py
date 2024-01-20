@@ -10,14 +10,22 @@ import numpy as np
 import pandas as pd
 import scienceplots
 import sympy as sym
+import tikzplotlib
 from matplotlib import pyplot as plt
+from matplotlib.legend import Legend
+
+# monkey patching
+from matplotlib.lines import Line2D
+from numpy import cos, pi, sin, sqrt
 from scipy import signal
 from scipy.fft import fft, fftfreq, ifft
 from scipy.interpolate import interp1d as interp
 from scipy.signal import butter, filtfilt, welch
 from statsmodels.tsa.seasonal import STL
-from numpy import pi, sin, cos, sqrt
 
+Line2D._us_dashSeq = property(lambda self: self._dash_pattern[1])
+Line2D._us_dashOffset = property(lambda self: self._dash_pattern[0])
+Legend._ncol = property(lambda self: self._ncols)
 plt.style.use(["science", "bright"])
 plt.rcParams.update(
     {
@@ -155,6 +163,8 @@ class ExpPostProcess:
         if y_lim is not None:
             plt.ylim(y_lim[0], y_lim[1])
         plt.tight_layout()
+        name = f"time_{self.config}a{self.aoa}d{self.deflection}_40k_{force}"
+        tikzplotlib.save(f"{name}.tex")
         plt.show()
 
     def name(self):
@@ -487,8 +497,8 @@ class PostPlots:
         plt.xlim([-0.1, cfd["deflection"].max() + 0.5])
         axs.legend(loc="best")
         fig.tight_layout()
-        plt.savefig(f"{force}_aoa{aoa_values}_comparison_{config}.png", dpi=300)
-        plt.show(block=True)
+        tikzplotlib.save(f"{force}_aoa{aoa_values}_comparison_{config}.tex")
+        # plt.show(block=True)
 
 
 class PostPlots_bcone(PostPlots):
@@ -1168,7 +1178,7 @@ def main():
     # fin
     fin_plot = PostPlots(cfd_fin, fin_post_df, inviscid_fin)
     flap_plot = PostPlots(cfd_flap, flap_post_df, inviscid_flap)
-    toggle = 0
+    toggle = 1
     if toggle == 1:
         for aoa in [0, 5]:
             # flap
@@ -1313,7 +1323,7 @@ def old_data():
 
 
 if __name__ == "__main__":
-    # main_avg_timesieres()
-    main()
+    main_avg_timesieres()
+    # main()
     # old_data()
     exit()
