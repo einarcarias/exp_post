@@ -106,7 +106,9 @@ class ExpPostProcess:
         plt.plot(time, force_avg, color="red")
         plt.xlabel(bold_text("Time(s)"))
         plt.ylabel(
-            bold_text(f"{force_name.capitalize()} Force ({'N' if force_name in ['normal','axial'] else 'Nm'})")
+            bold_text(
+                f"{force_name.capitalize()} Force ({'N' if force_name in ['normal','axial'] else 'Nm'})"
+            )
         )
         plt.xlim(0, 0.2)
         plt.show()
@@ -375,6 +377,7 @@ class ExpPostProcess_past(ExpPostProcess):
             plt.ylim(y_lim[0], y_lim[1])
         plt.tight_layout()
         plt.show()
+
 
 class PostPlots:
     """
@@ -734,8 +737,8 @@ def process_data_to_dataframe(config_data, condition_dict, config_name):
 
                 # Append the processed data to the list
 
-                if (aoa == 0 and deflect == 0) and (force in ["lift", "moment"]):
-                    force_avg = 0
+                # if (aoa == 0 and deflect == 0) and (force in ["lift", "moment"]):
+                #     force_avg = 0
                 data_list.append(
                     [aoa, deflect, force_dict[force], force_avg, force_std_avg]
                 )
@@ -1310,7 +1313,7 @@ def old_data():
 
 
 if __name__ == "__main__":
-    main_avg_timesieres()
-    # main()
+    # main_avg_timesieres()
+    main()
     # old_data()
     exit()
