@@ -1235,7 +1235,7 @@ def main_base_pres():
     honeywell = base_pressure.honeywell()
     gabeaud = base_pressure.gabeaud()
     love = base_pressure.love()
-    fig, ax = plt.subplots(figsize=(5, 4))
+    fig, ax = plt.subplots(figsize=(6, 3))
     linew = 1.5
 
     ax.plot(mach, honeywell, label="Honeywell", linewidth=linew, c="k", linestyle=":")
@@ -1363,5 +1363,6 @@ if __name__ == "__main__":
     # main_avg_timesieres()
     # main_base_pres()
     # main()
-    old_data()
+    # old_data()
+    main_base_pres()
     exit()
