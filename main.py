@@ -119,7 +119,7 @@ class ExpPostProcess:
             )
         )
         plt.xlim(0, 0.2)
-        plt.show()
+        # plt.show()
 
     def plot_avg(self, force, use_cutoff=False, y_lim=None):
         dict = {"moment": 3, "normal": 1, "axial": 2}
@@ -163,9 +163,10 @@ class ExpPostProcess:
         if y_lim is not None:
             plt.ylim(y_lim[0], y_lim[1])
         plt.tight_layout()
-        name = f"time_{self.config}a{self.aoa}d{self.deflection}_40k_{force}"
+        name = f"time_{self.config.lower()}a{self.aoa}d{self.deflection}_40k_{force}"
+        tikzplotlib.clean_figure()
         tikzplotlib.save(f"{name}.tex")
-        plt.show()
+        # plt.show()
 
     def name(self):
         return rf"{self.config}, $\alpha$={self.aoa}, $\delta$ = {self.deflection}"
@@ -1319,11 +1320,13 @@ def old_data():
     files = [filename for filename in os.listdir(data_dir) if filename.endswith(".lvm")]
     test = ExpPostProcess_past(files[0], "past", "N/A", "N/A")
     test.plot_raw("axial")
+    tikzplotlib.clean_figure()
+    tikzplotlib.save("time_villanueva.tex")
     pass
 
 
 if __name__ == "__main__":
-    main_avg_timesieres()
+    # main_avg_timesieres()
     # main()
-    # old_data()
+    old_data()
     exit()
