@@ -165,7 +165,12 @@ class ExpPostProcess:
         plt.tight_layout()
         name = f"time_{self.config.lower()}a{self.aoa}d{self.deflection}_40k_{force}"
         tikzplotlib.clean_figure()
-        tikzplotlib.save(f"{name}.tex")
+        tikzplotlib.save(
+            f"{name}.tex",
+            axis_width=".8\\textwidth",
+            axis_height=".8*\\axisdefaultheight",
+            table_row_sep=r"\\ ",
+        )
         # plt.show()
 
     def name(self):
@@ -498,7 +503,10 @@ class PostPlots:
         plt.xlim([-0.1, cfd["deflection"].max() + 0.5])
         axs.legend(loc="best")
         fig.tight_layout()
-        tikzplotlib.save(f"{force}_aoa{aoa_values}_comparison_{config}.tex")
+        # tikzplotlib.clean_figure(fig)
+        tikzplotlib.save(
+            f"{force}_aoa{aoa_values}_comparison_{config}.tex", table_row_sep="\\\\"
+        )
         # plt.show(block=True)
 
 
@@ -1228,6 +1236,12 @@ def main_base_pres():
     plt.tight_layout()
 
     plt.savefig("base_pressure.png", dpi=300)
+    tikzplotlib.save(
+        "base_pressure.tex",
+        axis_width=".8\\textwidth",
+        axis_height=".8*\\axisdefaultheight",
+        table_row_sep=r"\\",
+    )
     # plt.show(block=True)
     # %% testing aoa= 5, d = 10 for fin config
     pass
@@ -1321,12 +1335,18 @@ def old_data():
     test = ExpPostProcess_past(files[0], "past", "N/A", "N/A")
     test.plot_raw("axial")
     tikzplotlib.clean_figure()
-    tikzplotlib.save("time_villanueva.tex")
+    tikzplotlib.save(
+        "time_villanueva.tex",
+        axis_width=".8\\textwidth",
+        axis_height=".8*\\axisdefaultheight",
+        table_row_sep=r"\\ ",
+    )
     pass
 
 
 if __name__ == "__main__":
     # main_avg_timesieres()
-    # main()
-    old_data()
+    # main_base_pres()
+    main()
+    # old_data()
     exit()
