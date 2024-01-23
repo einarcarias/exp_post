@@ -432,7 +432,9 @@ class PostPlots:
         }
         return force_dict[force]
 
-    def plot_aoa(self, aoa_values: float, force: str, config: str) -> None:
+    def plot_aoa(
+        self, aoa_values: float, force: str, config: str, to_tikz=False
+    ) -> None:
         """
         Plot scatter plots with error bars for angle of attack (aoa) value(s)
         and a specified force type.
@@ -504,9 +506,12 @@ class PostPlots:
         axs.legend(loc="best")
         fig.tight_layout()
         # tikzplotlib.clean_figure(fig)
-        tikzplotlib.save(
-            f"{force}_aoa{aoa_values}_comparison_{config}.tex", table_row_sep="\\\\"
-        )
+        if to_tikz:
+            tikzplotlib.save(
+                f"{force}_aoa{aoa_values}_comparison_{config}.tex", table_row_sep="\\\\"
+            )
+        else:
+            plt.show(block=True)
         # plt.show(block=True)
 
 
