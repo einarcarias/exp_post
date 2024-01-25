@@ -104,7 +104,7 @@ class ExpPostProcess:
         }
         return force_dict[force]
 
-    def plot_raw(self, force):
+    def plot_raw(self, force, save_name=None, to_tikz=False):
         force_name = force
         force = self.dict_search(force)
         time = self.get_time_raw()
@@ -119,7 +119,17 @@ class ExpPostProcess:
             )
         )
         plt.xlim(0, 0.2)
-        # plt.show()
+        plt.tight_layout()
+        if to_tikz and (save_name is not None):
+            tikzplotlib.clean_figure()
+            tikzplotlib.save(
+                f"{save_name}.tex",
+                axis_width=".8\\textwidth",
+                axis_height=".8*\\axisdefaultheight",
+                table_row_sep=r"\\ ",
+            )
+        else:
+            plt.show()
 
     def plot_avg(self, force, use_cutoff=False, y_lim=None):
         dict = {"moment": 3, "normal": 1, "axial": 2}
@@ -1337,7 +1347,7 @@ def old_data():
     data_dir = Path("data")
     # read file names from the directory with the extension .lvm
     files = [filename for filename in os.listdir(data_dir) if filename.endswith(".lvm")]
-    test = ExpPostProcess_past(files[0], "past", "N/A", "N/A")
+    test = ExpPostProcess_past(files[1], "past", "N/A", "N/A")
     test.plot_raw("axial")
     tikzplotlib.clean_figure()
     tikzplotlib.save(
@@ -1352,6 +1362,6 @@ def old_data():
 if __name__ == "__main__":
     # main_avg_timesieres()
     # main_base_pres()
-    main()
-    # old_data()
+    # main()
+    old_data()
     exit()
