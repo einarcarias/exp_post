@@ -1347,15 +1347,10 @@ def old_data():
     data_dir = Path("data")
     # read file names from the directory with the extension .lvm
     files = [filename for filename in os.listdir(data_dir) if filename.endswith(".lvm")]
-    test = ExpPostProcess_past(files[1], "past", "N/A", "N/A")
+    option = files[3]
+    print(option)
+    test = ExpPostProcess_past(option, "past", "N/A", "N/A")
     test.plot_raw("axial")
-    tikzplotlib.clean_figure()
-    tikzplotlib.save(
-        "time_villanueva.tex",
-        axis_width=".8\\textwidth",
-        axis_height=".8*\\axisdefaultheight",
-        table_row_sep=r"\\ ",
-    )
     pass
 
 
@@ -1363,6 +1358,6 @@ if __name__ == "__main__":
     # main_avg_timesieres()
     # main_base_pres()
     # main()
-    # old_data()
-    main_base_pres()
+    old_data()
+    # main_base_pres()
     exit()
