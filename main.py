@@ -1202,18 +1202,18 @@ def main():
     # fin
     fin_plot = PostPlots(cfd_fin, fin_post_df, inviscid_fin)
     flap_plot = PostPlots(cfd_flap, flap_post_df, inviscid_flap)
-    toggle = 1
+    toggle = 0
     if toggle == 1:
         for aoa in [0, 5]:
             # flap
-            flap_plot.plot_aoa(aoa, "lift", "flap")
-            flap_plot.plot_aoa(aoa, "drag", "flap")
-            flap_plot.plot_aoa(aoa, "moment", "flap")
+            flap_plot.plot_aoa(aoa, "lift", "flap", to_tikz=True)
+            flap_plot.plot_aoa(aoa, "drag", "flap", to_tikz=True)
+            flap_plot.plot_aoa(aoa, "moment", "flap", to_tikz=True)
     else:
         for aoa in [0, 5]:
-            fin_plot.plot_aoa(aoa, "lift", "fin")
-            fin_plot.plot_aoa(aoa, "drag", "fin")
-            fin_plot.plot_aoa(aoa, "moment", "fin")
+            fin_plot.plot_aoa(aoa, "lift", "fin", to_tikz=True)
+            fin_plot.plot_aoa(aoa, "drag", "fin", to_tikz=True)
+            fin_plot.plot_aoa(aoa, "moment", "fin", to_tikz=True)
 
 
 def main_avg_timesieres():
@@ -1357,7 +1357,7 @@ def old_data():
 if __name__ == "__main__":
     # main_avg_timesieres()
     # main_base_pres()
-    # main()
-    old_data()
+    main()
+    # old_data()
     # main_base_pres()
     exit()
