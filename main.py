@@ -13,6 +13,7 @@ import sympy as sym
 import tikzplotlib
 from matplotlib import pyplot as plt
 from matplotlib.legend import Legend
+import sympy as sp
 
 # monkey patching
 from matplotlib.lines import Line2D
@@ -131,11 +132,16 @@ class ExpPostProcess:
         else:
             plt.show()
 
-    def plot_avg(self, force, use_cutoff=False, y_lim=None):
+    def plot_avg(
+        self, force, use_cutoff=False, y_lim=None, manual_cutoff=(), to_tikz=False
+    ):
         dict = {"moment": 3, "normal": 1, "axial": 2}
         column = dict[force]
-        self.get_avg(force)
-        min_time, max_time = self.get_minmax()
+        self.get_avg(force, manual_cutoff)
+        if manual_cutoff != ():
+            min_time, max_time = manual_cutoff
+        else:
+            min_time, max_time = self.get_minmax()
 
         # Plotting original and smoothed data
         plt.figure(figsize=(6, 3))
@@ -173,27 +179,34 @@ class ExpPostProcess:
         if y_lim is not None:
             plt.ylim(y_lim[0], y_lim[1])
         plt.tight_layout()
-        name = f"time_{self.config.lower()}a{self.aoa}d{self.deflection}_40k_{force}"
-        tikzplotlib.clean_figure()
-        tikzplotlib.save(
-            f"{name}.tex",
-            axis_width=".8\\textwidth",
-            axis_height=".8*\\axisdefaultheight",
-            table_row_sep=r"\\ ",
-        )
-        # plt.show()
+        if to_tikz:
+            name = (
+                f"time_{self.config.lower()}a{self.aoa}d{self.deflection}_40k_{force}"
+            )
+            tikzplotlib.clean_figure()
+            tikzplotlib.save(
+                f"{name}.tex",
+                axis_width=".8\\textwidth",
+                axis_height=".8*\\axisdefaultheight",
+                table_row_sep=r"\\ ",
+            )
+        else:
+            plt.show()
 
     def name(self):
         return rf"{self.config}, $\alpha$={self.aoa}, $\delta$ = {self.deflection}"
 
-    def get_avg(self, force):
+    def get_avg(self, force, manual_cutoff=()):
         dict = {"moment": 3, "normal": 1, "axial": 2}
         column = dict[force]
         window = self.averaging_window
         smooth = self.df.iloc[:, column].rolling(window=window, center=True).mean()
         smooth.fillna(0, inplace=True)
         self.df[f"smooth {dict[force]}"] = smooth
-        min_time, max_time = self.get_minmax()
+        if manual_cutoff != ():
+            min_time, max_time = manual_cutoff
+        else:
+            min_time, max_time = self.get_minmax()
         relevant_data = (self.df.iloc[:, 0] >= min_time) & (
             self.df.iloc[:, 0] <= max_time
         )
@@ -201,7 +214,7 @@ class ExpPostProcess:
         std = self.df.loc[indices, [f"smooth {dict[force]}"]].std()
         avg_force = self.df.loc[indices, [f"smooth {dict[force]}"]].mean()
 
-        return avg_force[0], std[0]
+        return avg_force.iloc[0], std.iloc[0]
 
     def cut_data(self, start_time, end_time):
         # reset index
@@ -269,11 +282,11 @@ class ExpPostProcess:
                     i["psd"],
                     linewidth=lwidth,
                     label=i["label"][0],
-                    c="k"
-                    if i["config"][0] == "Background"
-                    else "g"
-                    if i["config"][0] == "Tap 1"
-                    else "orange",
+                    c=(
+                        "k"
+                        if i["config"][0] == "Background"
+                        else "g" if i["config"][0] == "Tap 1" else "orange"
+                    ),
                 )
             else:
                 lwidth = 1
@@ -468,6 +481,8 @@ class PostPlots:
 
         max_val = {"CL": 0.38, "CD": 0.25, "CM": 0.2}[force_target]
 
+        cfd_error  = np.abs(8.11-8.2)
+
         fig, axs = plt.subplots(figsize=(5, 4))
 
         # Data sort
@@ -501,10 +516,11 @@ class PostPlots:
             c="k",
             capsize=5,
         )
-        axs.scatter(
+        axs.plot(
             exp["deflection"],
             exp[force_target].apply(lambda x: x[0]),
             marker="s",
+            linestyle="None",
             c="k",
             label="Experiment",
         )
@@ -580,34 +596,48 @@ class ErrorAnalysis:
         self.velocity, self.velocity_std = boundary_conditions["velocity"]
         self.diameter, self.diameter_std = boundary_conditions["diameter"]
 
-    def coef_calc(self, force):
+    def coef_calc(self, force, manual_cutoff=()):
         # obtain normal and axial forces std and avg
+        aoa_std = 0.1
+        if manual_cutoff != ():
+            normal_avg, normal_std = self.ExpPostProcess_object.get_avg(
+                "normal", manual_cutoff
+            )
+            axial_avg, axial_std = self.ExpPostProcess_object.get_avg(
+                "axial", manual_cutoff
+            )
+        else:
+            normal_avg, normal_std = self.ExpPostProcess_object.get_avg("normal")
+            axial_avg, axial_std = self.ExpPostProcess_object.get_avg("axial")
+
         def calculate_drag_avg_std(
-            avg_normal, std_normal, avg_axial, std_axial, avg_alpha, std_alpha
+            avg_normal, std_normal, avg_axial, std_axial, avg_alpha, std_alpha, k
         ):
             # Convert angle from degrees to radians
-            avg_alpha_rad = np.radians(avg_alpha)
-            std_alpha_rad = np.radians(std_alpha)
+            avg_alpha_rad = np.deg2rad(avg_alpha)
+            std_alpha_rad = np.deg2rad(std_alpha)
 
             # Calculate average lift using the respective means of normal, axial coefficients, and alpha
             avg_drag = cd_calc(avg_axial, avg_normal, avg_alpha_rad)
             # Calculate variance of lift using the standard deviations assuming independence
+            k_n = k[0]
+            k_n = k_n.subs(sp.symbols("n"), avg_normal)
+            k_n = k_n.subs(sp.symbols("a"), avg_axial)
+            k_n = k_n.subs(sp.symbols("alpha"), avg_alpha_rad)
+            k_a = k[1]
+            k_a = k_a.subs(sp.symbols("n"), avg_normal)
+            k_a = k_a.subs(sp.symbols("a"), avg_axial)
+            k_a = k_a.subs(sp.symbols("alpha"), avg_alpha_rad)
+            k_alpha = k[2]
+            k_alpha = k_alpha.subs(sp.symbols("n"), avg_normal)
+            k_alpha = k_alpha.subs(sp.symbols("a"), avg_axial)
+            k_alpha = k_alpha.subs(sp.symbols("alpha"), avg_alpha_rad)
+
+            alpha_calc = 0 if avg_alpha == 0 else (float(k_alpha)*std_alpha_rad / avg_alpha_rad) ** 2
             var_drag = sqrt(
-                (cos(avg_alpha_rad) * std_axial / avg_drag) ** 2
-                + (sin(avg_alpha_rad) * std_normal / avg_drag) ** 2
-                + (
-                    (
-                        (
-                            (
-                                -avg_axial * sin(avg_alpha_rad)
-                                + avg_normal * cos(avg_alpha_rad)
-                            )
-                            * std_alpha_rad
-                        )
-                        / avg_drag
-                    )
-                    ** 2
-                )
+                (float(k_a)*std_axial / avg_axial) ** 2
+                + (float(k_n)*std_normal / avg_normal) ** 2
+                + alpha_calc
             )
 
             # Convert variance to standard deviation
@@ -616,29 +646,39 @@ class ErrorAnalysis:
             return avg_drag, std_drag
 
         def calculate_lift_avg_std(
-            avg_normal, std_normal, avg_axial, std_axial, avg_alpha, std_alpha
+            avg_normal, std_normal, avg_axial, std_axial, avg_alpha, std_alpha, k
         ):
             # Convert angle from degrees to radians
-            avg_alpha_rad = np.radians(avg_alpha)
-            std_alpha_rad = np.radians(std_alpha)
+            avg_alpha_rad = np.deg2rad(avg_alpha)
+            std_alpha_rad = np.deg2rad(std_alpha)
 
             # Calculate average drag using the respective means of normal, axial coefficients, and alpha
             avg_lift = cl_calc(avg_axial, avg_normal, avg_alpha_rad)
             # Calculate the variance of the lift coefficient assuming statistical independence
+            k_n = k[0]
+            # sub in values
+            k_n = k_n.subs(sp.symbols("n"), avg_normal)
+            k_n = k_n.subs(sp.symbols("a"), avg_axial)
+            k_n = k_n.subs(sp.symbols("alpha"), avg_alpha_rad)
+            k_a = k[1]
+            k_a = k_a.subs(sp.symbols("n"), avg_normal)
+            k_a = k_a.subs(sp.symbols("a"), avg_axial)
+            k_a = k_a.subs(sp.symbols("alpha"), avg_alpha_rad)
+            k_alpha = k[2]
+            k_alpha = k_alpha.subs(sp.symbols("n"), avg_normal)
+            k_alpha = k_alpha.subs(sp.symbols("a"), avg_axial)
+            k_alpha = k_alpha.subs(sp.symbols("alpha"), avg_alpha_rad)
+
+            alpha_calc = (
+                0
+                if avg_alpha == 0
+                else (float(k_alpha) * std_alpha_rad / avg_alpha_rad) ** 2
+            )
+
             var_lift = sqrt(
-                (-sin(avg_alpha_rad) * std_axial / avg_lift) ** 2
-                + (cos(avg_alpha_rad) * std_normal / avg_lift) ** 2
-                + (
-                    (
-                        (
-                            -avg_axial * cos(avg_alpha_rad)
-                            - avg_normal * sin(avg_alpha_rad)
-                        )
-                        * std_alpha_rad
-                    )
-                    / avg_lift
-                )
-                ** 2
+                (float(k_a) * std_axial / avg_axial) ** 2
+                + (float(k_n) * std_normal / avg_normal) ** 2
+                + (alpha_calc)
             )
 
             # Convert variance to standard deviation
@@ -646,9 +686,23 @@ class ErrorAnalysis:
 
             return avg_lift, std_lift
 
-        aoa_std = 0.1
-        normal_avg, normal_std = self.ExpPostProcess_object.get_avg("normal")
-        axial_avg, axial_std = self.ExpPostProcess_object.get_avg("axial")
+        # symbolic equations to find k
+        n_sym, a_sym, alpha_sym = sp.symbols("n a alpha")
+
+        # lift equation
+        cl_sym = (n_sym * sp.cos(alpha_sym)) - (a_sym * sp.sin(alpha_sym))
+        k_l_n = sp.diff(cl_sym, n_sym) * (n_sym / cl_sym)
+        k_l_a = sp.diff(cl_sym, a_sym) * (a_sym / cl_sym)
+        k_l_alpha = sp.diff(cl_sym, alpha_sym) * (alpha_sym / cl_sym)
+        # print simplified k
+        k_l = [k_l_n, k_l_a, k_l_alpha]
+        # drag equation
+        cd_sym = (n_sym * sp.sin(alpha_sym)) + (a_sym * sp.cos(alpha_sym))
+        k_d_n = sp.diff(cd_sym, n_sym) * (n_sym / cd_sym)
+        k_d_a = sp.diff(cd_sym, a_sym) * (a_sym / cd_sym)
+        k_d_alpha = sp.diff(cd_sym, alpha_sym) * (alpha_sym / cd_sym)
+        # print simplified k
+        k_d = [k_d_n, k_d_a, k_d_alpha]
 
         if force == "lift":
             force_avg, force_std = calculate_lift_avg_std(
@@ -658,6 +712,7 @@ class ErrorAnalysis:
                 axial_std,
                 self.ExpPostProcess_object.aoa,
                 aoa_std,
+                k_l,
             )
         elif force == "drag":
             force_avg, force_std = calculate_drag_avg_std(
@@ -667,6 +722,7 @@ class ErrorAnalysis:
                 axial_std,
                 self.ExpPostProcess_object.aoa,
                 aoa_std,
+                k_d,
             )
         else:
             force_avg, force_std = self.ExpPostProcess_object.get_avg(force)
@@ -691,15 +747,19 @@ class ErrorAnalysis:
         return force_coef.astype(np.float64), coef_std.astype(np.float64)
 
     @staticmethod
-    def repeat_avg(ErrorAnalysisList, force):
+    def repeat_avg(ErrorAnalysisList, force, manual_cutoff=()):
         for i in ErrorAnalysisList:
             if not isinstance(i, ErrorAnalysis):
                 raise TypeError("ErrorAnalysis object required.")
         force_list = []
         force_std_list = []
         for i in ErrorAnalysisList:
-            force_list.append(i.coef_calc(force)[0])
-            force_std_list.append(i.coef_calc(force)[1])
+            if manual_cutoff != ():
+                force_list.append(i.coef_calc(force, manual_cutoff)[0])
+                force_std_list.append(i.coef_calc(force, manual_cutoff)[1])
+            else:
+                force_list.append(i.coef_calc(force)[0])
+                force_std_list.append(i.coef_calc(force)[1])
         force_avg = np.mean(force_list)
         force_mat = np.array(force_list)
         force_std_mat = np.array(force_std_list)
@@ -868,6 +928,7 @@ def base_pressure_correction(
         The corrected drag coefficient.
     """
     ratio = sting_area / base_area
+    alpha = np.deg2rad(alpha)
     ca_base = ca_base_0[0] if alpha == 0 else ca_base_0[0] * (np.cos(alpha) ** 2)
     ca_base = ca_base * ratio
     ca, cn = sym.symbols("ca,cn")
@@ -995,13 +1056,19 @@ class BasePressureCalc:
                 raise ValueError("Mach number out of range")
 
         return [
-            -(0.115 + (10 * mach - 3) ** 3 * 10 ** (-4))
-            if 0 < mach < 1
-            else -(0.255 - 0.135 * np.log(mach))
-            if 1.1 <= mach < 5
-            else -(0.019 - 0.012 * (mach - 5) + (0.1 / mach))
-            if mach > 5
-            else None
+            (
+                -(0.115 + (10 * mach - 3) ** 3 * 10 ** (-4))
+                if 0 < mach < 1
+                else (
+                    -(0.255 - 0.135 * np.log(mach))
+                    if 1.1 <= mach < 5
+                    else (
+                        -(0.019 - 0.012 * (mach - 5) + (0.1 / mach))
+                        if mach > 5
+                        else None
+                    )
+                )
+            )
             for mach in self.mach_list
         ]
 
@@ -1075,9 +1142,9 @@ def data_dicts():
 
 
 def tunnel_conditions():
-    rho = 0.0371
+    rho = 0.0381
     rho_std = 7.1 / 100 * rho  # in percent
-    velocity = 1553
+    velocity = 1551.939
     velocity_std = 1.6 / 100 * velocity  # in percent
     diameter = 0.06
     diameter_std = np.sqrt(0.0005 / diameter) ** 2 * diameter
@@ -1087,7 +1154,7 @@ def tunnel_conditions():
         "velocity": (velocity, velocity_std),
         "diameter": (diameter, diameter_std),
         "sting_diam": 15.875e-3,
-        "mach": 8.2,
+        "mach": 8.11,
     }
     return condition_dict
 
@@ -1202,7 +1269,7 @@ def main():
     # fin
     fin_plot = PostPlots(cfd_fin, fin_post_df, inviscid_fin)
     flap_plot = PostPlots(cfd_flap, flap_post_df, inviscid_flap)
-    toggle = 0
+    toggle = 1
     if toggle == 1:
         for aoa in [0, 5]:
             # flap
@@ -1211,9 +1278,21 @@ def main():
             flap_plot.plot_aoa(aoa, "moment", "flap", to_tikz=True)
     else:
         for aoa in [0, 5]:
-            fin_plot.plot_aoa(aoa, "lift", "fin", to_tikz=True)
-            fin_plot.plot_aoa(aoa, "drag", "fin", to_tikz=True)
-            fin_plot.plot_aoa(aoa, "moment", "fin", to_tikz=True)
+            fin_plot.plot_aoa(
+                aoa,
+                "lift",
+                "fin",to_tikz=True
+            )
+            fin_plot.plot_aoa(
+                aoa,
+                "drag",
+                "fin",to_tikz=True
+            )
+            fin_plot.plot_aoa(
+                aoa,
+                "moment",
+                "fin",to_tikz=True
+            )
 
 
 def main_avg_timesieres():
@@ -1354,10 +1433,62 @@ def old_data():
     pass
 
 
+def sharp_cone():
+    rho = 0.0371
+    rho_std = 7.1 / 100 * rho  # in percent
+    velocity = 1553
+    velocity_std = 1.6 / 100 * velocity  # in percent
+    diameter = 17e-3
+    diameter_std = np.sqrt(0.0005 / diameter) ** 2 * diameter
+    # put all conditions in a dictionary
+    condition_dict = {
+        "rho": (rho, rho_std),
+        "velocity": (velocity, velocity_std),
+        "diameter": (diameter, diameter_std),
+        "sting_diam": 12e-3,
+        "mach": 8.2,
+    }
+    averaging_window = 500
+    file_names = ["TR039.lvm", "TR040.lvm", "TR041.lvm", "TR042.lvm"]
+    time_cut = (0.01907, 0.03094)
+    test = ExpPostProcess(file_names[0], "Sharp Cone", 0.0, "N/A")
+    test.averaging_window = averaging_window
+    test.plot_avg("axial", manual_cutoff=time_cut)
+
+    # force dictiory
+
+    # List to store processed data
+    data_list = []
+    diameter_model = condition_dict["diameter"][0]
+    diamter_sting = condition_dict["sting_diam"]
+    ca_base_0 = BasePressureCalc(condition_dict["mach"]).gabeaud()
+    post_obj = []
+    force_coef_list = []
+    for files in file_names:
+        post_obj = ExpPostProcess(files, "Sharp Cone", 0.0, "N/A")
+        post_obj.averaging_window = averaging_window
+        # Process each file in the list for the current configuration
+        coef = ErrorAnalysis(post_obj, condition_dict)
+        force_coef_list.append(coef)
+
+    force_avg, force_std_avg = ErrorAnalysis.repeat_avg(
+        force_coef_list, "drag", time_cut
+    )
+    base_area = np.pi * diameter_model**2 / 4
+    sting_area = np.pi * diamter_sting**2 / 4
+    cl, cd = base_pressure_correction(
+        force_avg, 0.0, ca_base_0, 0.0, base_area, sting_area
+    )
+
+    data_list.append(["CA", cd, force_std_avg])
+    print(data_list)
+
+
 if __name__ == "__main__":
     # main_avg_timesieres()
     # main_base_pres()
     main()
     # old_data()
     # main_base_pres()
+    # sharp_cone()
     exit()
