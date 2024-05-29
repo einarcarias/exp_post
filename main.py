@@ -36,6 +36,7 @@ plt.rcParams.update(
     }
 )
 dir_path = os.path.dirname(os.path.realpath(__file__))
+data_path = Path("data")
 # default dpi 300 when saving
 plt.rcParams["savefig.dpi"] = 300
 
@@ -57,7 +58,8 @@ class ExpPostProcess:
         self.aoa = aoa
         self.deflection = deflection
         self.filename = filename
-        self.df = pd.read_csv(filename, delimiter="\t", dtype=np.float64)
+        # determine if file has .xlsx or .csv extension
+        self.df = self.xlsx_or_csv(filename)
         self.test_type()
         self.sampling_rate = self.get_sampling_rate()
         self.averaging_window = 60 if self.sampling_rate < 10006 else 200
@@ -131,6 +133,13 @@ class ExpPostProcess:
             )
         else:
             plt.show()
+    # static method
+    @staticmethod
+    def xlsx_or_csv(filename):
+        if ".xlsx" in filename:
+            return pd.read_excel(filename, dtype=np.float64)
+        else:
+            return pd.read_csv(filename, delimiter="\t", dtype=np.float64)
 
     def plot_avg(
         self, force, use_cutoff=False, y_lim=None, manual_cutoff=(), to_tikz=False
@@ -307,7 +316,7 @@ class ExpPostProcess:
             ax.set_xlim(xmin, xmax)
             ax.xaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
         plt.xlabel(bold_text("Frequency, Hz"))
-        plt.ylabel(bold_text("PSD, N$\mathrm{^2}$/Hz"))
+        plt.ylabel(bold_text(r"PSD, N$\mathrm{^2}$/Hz"))
         plt.tight_layout()
 
         # add legend outside the plot window below
@@ -365,7 +374,7 @@ class ExpPostProcess_past(ExpPostProcess):
             ax.set_xlim(xmin, xmax)
             ax.xaxis.set_minor_formatter(mpl.ticker.ScalarFormatter())
         plt.xlabel(bold_text("Frequency, Hz"))
-        plt.ylabel(bold_text("PSD, N$\mathrm{^2}$/Hz"))
+        plt.ylabel(bold_text(r"PSD, N$\mathrm{^2}$/Hz"))
         plt.tight_layout()
 
         # add legend outside the plot window below
@@ -537,7 +546,7 @@ class PostPlots:
                 f"{force}_aoa{aoa_values}_comparison_{config}.tex", table_row_sep="\\\\"
             )
         else:
-            plt.show(block=True)
+            plt.show()
         # plt.show(block=True)
 
 
@@ -725,7 +734,12 @@ class ErrorAnalysis:
                 k_d,
             )
         else:
-            force_avg, force_std = self.ExpPostProcess_object.get_avg(force)
+            if manual_cutoff != ():
+                force_avg, force_std = self.ExpPostProcess_object.get_avg(
+                    force, manual_cutoff
+                )
+            else:
+                force_avg, force_std = self.ExpPostProcess_object.get_avg(force)
 
         force_coef = force_avg / (
             0.5 * self.rho * self.velocity**2 * (np.pi * self.diameter**2 / 4)
@@ -779,7 +793,7 @@ def cd_calc(axial, normal, aoa):
     return (axial * np.cos(aoa)) + (normal * np.sin(aoa))
 
 
-def process_data_to_dataframe(config_data, condition_dict, config_name):
+def process_data_to_dataframe(config_data, condition_dict, config_name, manual_cutoff=()):
     """
     Process and organize the data based on angle of attack (aoa), deflection,
     and force type (drag, lift, moment) and return as a Pandas DataFrame.
@@ -807,6 +821,7 @@ def process_data_to_dataframe(config_data, condition_dict, config_name):
             # Loop through each force type: drag, lift, and moment
             for force in ["drag", "lift", "moment"]:
                 # Check if the data for a given aoa and deflection is a list
+
                 if type(config_data[aoa][deflect]) == list:
                     force_coef_list = []
 
@@ -817,9 +832,15 @@ def process_data_to_dataframe(config_data, condition_dict, config_name):
                         force_coef_list.append(coef)
 
                     # Calculate average and standard deviation of force coefficients
-                    force_avg, force_std_avg = ErrorAnalysis.repeat_avg(
-                        force_coef_list, force
-                    )
+                    #if manual cutoff is not an empty tuple
+                    if manual_cutoff != ():
+                        force_avg, force_std_avg = ErrorAnalysis.repeat_avg(
+                            force_coef_list, force, manual_cutoff
+                        )
+                    else:
+                        force_avg, force_std_avg = ErrorAnalysis.repeat_avg(
+                            force_coef_list, force
+                        )
 
                 else:
                     # Handle case where data for a given aoa and deflection is not a list
@@ -1294,7 +1315,95 @@ def main():
                 "fin",to_tikz=True
             )
 
+def peter_files():
+    condition_dict = tunnel_conditions()
+    peter_data_name = {
+        5: {
+            0: ["5701.xlsx","5704.xlsx","5705.xlsx"],
+            5: ["5706.xlsx","5711.xlsx","5712.xlsx"],
+            10: ["5713.xlsx","5717.xlsx","5718.xlsx"],
+        },
+    }
 
+    # fin_a5_d0 = ExpPostProcess(peter_data_name[5][10][0], "Fin", 5, 10)
+    # fin_a5_d0.plot_avg("axial",manual_cutoff=(0.0211,0.0460))
+    peter_fin_post_df = process_data_to_dataframe(peter_data_name,condition_dict, "Fin", manual_cutoff=(0.0211,0.0460))
+    sting_test, bicone_data, fin_config_data, flap_config_data = data_dicts()
+    my_fin_post_df = process_data_to_dataframe(fin_config_data, condition_dict, "Fin")
+    cfd_fin = [
+        pd.read_excel(data_path/f"mach8_SST_{force}.xlsx", sheet_name="fin", index_col=0)
+        .reset_index()
+        .melt(id_vars=["index"], var_name="deflection", value_name=force)
+        for force in ["CL", "CD", "CM"]
+    ]
+    # Merge the dataframes using the index and deflection columns
+    cfd_fin = (
+        cfd_fin[0]
+        .merge(cfd_fin[1], on=["index", "deflection"])
+        .merge(cfd_fin[2], on=["index", "deflection"])
+    )
+    cfd_fin.rename(columns={"index": "aoa"}, inplace=True)
+    aoa_values = 5
+    force_target = "CL"
+    def plot_peter(aoa_values,force_target):
+        force_label = {"CL":"Lift","CD":"Drag","CM":"Moment"}[force_target]
+        max_val = {"CL": 0.38, "CD": 0.5, "CM": 0.2}[force_target]
+    # Data sort
+        cfd = cfd_fin.query(f"aoa == {str(aoa_values)}")
+        exp = my_fin_post_df.query(f"aoa == {str(aoa_values)}")
+        peter_exp = peter_fin_post_df.query(f"aoa == {str(aoa_values)}")
+        fig, ax = plt.subplots(figsize=(5, 4))
+        ax.plot(
+            cfd["deflection"],
+            cfd[force_target],
+            marker="^",
+            linestyle="--",
+            label=rf"CFD",
+        )
+        ax.plot(
+            peter_exp["deflection"],
+            peter_exp[force_target].apply(lambda x: x[0]),
+            marker="v",
+            c="r",
+            linestyle="None",
+            linewidth=1.5,
+            label=f"Peter's Exp",
+        )
+
+        ax.errorbar(
+            peter_exp["deflection"],
+            peter_exp[force_target].apply(lambda x: x[0]),
+            yerr=exp[force_target].apply(lambda x: x[1]),
+            fmt="none",
+            c="r",
+            capsize=5,
+        )
+        ax.plot(
+            exp["deflection"],
+            exp[force_target].apply(lambda x: x[0]),
+            marker="s",
+            linestyle="None",
+            c="k",
+            label="Einar's Exp",
+        )
+        ax.errorbar(
+            exp["deflection"],
+            exp[force_target].apply(lambda x: x[0]),
+            yerr=exp[force_target].apply(lambda x: x[1]),
+            fmt="none",
+            c="k",
+            capsize=5,
+        )
+
+        ax.set_xlabel(bold_text("Deflection Angle (deg)"))
+        ax.set_ylabel(bold_text(f"{force_label.capitalize()} Coefficient"))
+        plt.ylim([0.0, max_val])
+        plt.xlim([-0.1, cfd["deflection"].max() + 0.5])
+        ax.legend(loc="best")
+        fig.tight_layout()
+        plt.show()
+    [plot_peter(aoa_values,force_target) for force_target in ["CL","CD","CM"]]
+    pass
 def main_avg_timesieres():
     sting_test, bicone_data, fin_config_data, flap_config_data = data_dicts()
     fin_a5_d10 = fin_config_data[5][10][-1]
@@ -1487,7 +1596,8 @@ def sharp_cone():
 if __name__ == "__main__":
     # main_avg_timesieres()
     # main_base_pres()
-    main()
+    # main()
+    peter_files()
     # old_data()
     # main_base_pres()
     # sharp_cone()
